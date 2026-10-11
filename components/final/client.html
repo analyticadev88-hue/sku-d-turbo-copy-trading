@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>JoeMoney Local Order Console</title>
+  <title>SkuD Turbo Local Order Console</title>
   <style>
     :root { color-scheme: light; font-family: "Segoe UI", sans-serif; background: #f4f7f7; color: #172322; }
     * { box-sizing: border-box; }
@@ -32,11 +32,11 @@
 </head>
 <body>
   <main>
-    <header><div class="brand">JOEMONEY / LOCAL MT5</div><div class="state"><span id="dot" class="dot"></span><span id="terminal">Checking bridge...</span></div></header>
+    <header><div class="brand">SKUD TURBO / LOCAL MT5</div><div class="state"><span id="dot" class="dot"></span><span id="terminal">Checking bridge...</span></div></header>
     <h1>Demo order console</h1>
     <p>Submits individual orders to the local bridge. Keep this on the same Windows machine as MT5. Start with a demo account only.</p>
     <form id="order-form">
-      <label class="wide">Local client token<input id="token" type="password" autocomplete="off" required minlength="32" placeholder="Paste JOEMONEY_CLIENT_TOKEN"></label>
+      <label class="wide">Local client token<input id="token" type="password" autocomplete="off" required minlength="32" placeholder="Paste SKUD_CLIENT_TOKEN"></label>
       <label>Broker symbol<input id="symbol" required value="EURUSD" maxlength="64"></label>
       <label>Order type<select id="type"><option>BUY_STOP</option><option>SELL_STOP</option><option>BUY_LIMIT</option><option>SELL_LIMIT</option><option>MARKET_BUY</option><option>MARKET_SELL</option></select></label>
       <label>Volume per position<input id="volume" type="number" min="0.01" max="100" step="0.01" value="0.01" required></label>

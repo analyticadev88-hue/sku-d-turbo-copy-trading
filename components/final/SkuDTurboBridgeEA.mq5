@@ -1,4 +1,4 @@
-// Student execution EA. Runs only on VPS-managed follower accounts.
+// SkuD student execution EA. Runs only on VPS-managed follower accounts.
 #property strict
 #property version "8.00"
 
@@ -6,7 +6,7 @@ input string BridgeUrl = "http://127.0.0.1:8765";
 // Fixed at compile time on purpose. Chart profiles (.chr) can only override
 // `input` parameters — a plain global cannot be touched — so a stale token
 // saved in a chart profile can never lock a terminal out with 401s again.
-string EaToken = "dab2da53cd7c4cd9ad0116a9a85f1dab814360e3e04a42c1a45b6f6b6a34b8c2";
+input string EaToken = "";
 input int PollSeconds = 1;
 input int SlippagePoints = 20;
 // Fixed list, not an input: chart profiles cannot override it, so a stale
@@ -23,7 +23,7 @@ string g_last_response_headers = "";
 string g_pending_result_id = "";
 string g_pending_result_path = "";
 string g_pending_result_body = "";
-string g_order_comment = "JoeMoney";
+string g_order_comment = "SkuD Turbo";
 
 int OnInit()
 {
@@ -83,7 +83,7 @@ bool HttpRequest(const string method, const string url, const string body,
    g_last_response_headers = result_headers;
    if(http_status == -1)
    {
-      Print("JoeMoney WebRequest failed: ", GetLastError(), " (check MT5 WebRequest allowlist)");
+      Print("SkuD WebRequest failed: ", GetLastError(), " (check MT5 WebRequest allowlist)");
       response = "";
       return false;
    }
@@ -100,11 +100,11 @@ void PollBridge()
       if(!HttpRequest("POST", BridgeUrl + g_pending_result_path,
                       g_pending_result_body, retry_response, retry_status) || retry_status != 200)
       {
-         Print("JoeMoney result retry pending for command ", g_pending_result_id,
+         Print("SkuD result retry pending for command ", g_pending_result_id,
                ", HTTP ", retry_status, ", response: ", retry_response);
          return;
       }
-      Print("JoeMoney result retry acknowledged for command ", g_pending_result_id);
+      Print("SkuD result retry acknowledged for command ", g_pending_result_id);
       g_pending_result_id = "";
       g_pending_result_path = "";
       g_pending_result_body = "";
@@ -128,7 +128,7 @@ void PollBridge()
       int count = StringSplit(response, separator, fields);
       if(count != 9 && count != 10)
       {
-         Print("JoeMoney received malformed command: ", response);
+         Print("SkuD received malformed command: ", response);
          break;
       }
 
@@ -141,24 +141,24 @@ void PollBridge()
       double tp_distance = StringToDouble(fields[6]);
       bool sl_enabled = fields[7] == "1";
       double sl_distance = StringToDouble(fields[8]);
-      g_order_comment = "JoeMoney";
+      g_order_comment = "SkuD Turbo";
       if(count == 10 && StringLen(fields[9]) > 0)
          g_order_comment = StringSubstr(fields[9], 0, 25);
 
-      Print("JoeMoney processing ", order_type, " ", symbol, " volume ", DoubleToString(volume, 2),
+      Print("SkuD processing ", order_type, " ", symbol, " volume ", DoubleToString(volume, 2),
          " entry ", DoubleToString(entry_price, 8), " command ", command_id);
       string message;
       ulong ticket = 0;
       bool placed = ExecuteOrder(symbol, order_type, volume, entry_price, tp_enabled, tp_distance,
                                  sl_enabled, sl_distance, ticket, message);
-      Print("JoeMoney execution ", (placed ? "accepted" : "rejected"), " command ", command_id,
+      Print("SkuD execution ", (placed ? "accepted" : "rejected"), " command ", command_id,
          ": ", message);
       if(!SendResult(command_id, placed, ticket, message))
          break; // ack will be retried on the next timer tick before claiming more
       processed++;
    }
    if(processed > 0)
-      Print("JoeMoney command batch complete: ", processed, " order(s) this tick");
+      Print("SkuD command batch complete: ", processed, " order(s) this tick");
 }
 
 bool ExecuteOrder(const string symbol, const string order_type, const double requested_volume,
@@ -314,7 +314,7 @@ bool SendResult(const string id, const bool placed, const ulong ticket, const st
                            g_pending_result_body, response, status);
    if(!sent || status != 200)
    {
-      Print("JoeMoney result acknowledgement failed, HTTP ", status, ", response: ", response,
+      Print("SkuD result acknowledgement failed, HTTP ", status, ", response: ", response,
             ", headers: ", g_last_response_headers);
       return false; // g_pending_result_* stays set; PollBridge retries before claiming more
    }
@@ -339,14 +339,14 @@ void PollCloses()
    ushort separator = StringGetCharacter("|", 0);
    if(StringSplit(response, separator, fields) != 3)
    {
-      Print("JoeMoney received malformed close request: ", response);
+         Print("SkuD received malformed close request: ", response);
       return;
    }
 
    string close_id = fields[0];
    ulong ticket = (ulong)StringToInteger(fields[1]);
    string action = fields[2];
-   Print("JoeMoney processing ", action, " request ", close_id,
+   Print("SkuD processing ", action, " request ", close_id,
          ticket == 0 ? " (all)" : " (ticket " + (string)ticket + ")");
    string message;
    bool ok = false;
@@ -354,7 +354,7 @@ void PollCloses()
       ok = ExecuteCancel(ticket, message);
    else
       ok = ExecuteClose(ticket, message);
-   Print("JoeMoney ", action, " ", close_id, ok ? " succeeded" : " failed", ": ", message);
+   Print("SkuD ", action, " ", close_id, ok ? " succeeded" : " failed", ": ", message);
    SendCloseResult(close_id, ok, message);
 }
 
@@ -484,7 +484,7 @@ bool CloseOnePosition(const ulong pos_ticket, string &message)
    request.type = (pos_type == POSITION_TYPE_BUY) ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
    request.price = (request.type == ORDER_TYPE_SELL) ? tick.bid : tick.ask;
    request.type_filling = GetMarketFilling(symbol);
-   request.comment = "JoeMoney close";
+   request.comment = "SkuD Turbo close";
    ResetLastError();
    if(!OrderSend(request, result))
    {
@@ -512,7 +512,7 @@ void SendCloseResult(const string id, const bool closed, const string message)
                            g_pending_result_body, response, status);
    if(!sent || status != 200)
    {
-      Print("JoeMoney close acknowledgement failed, HTTP ", status, ", response: ", response,
+      Print("SkuD close acknowledgement failed, HTTP ", status, ", response: ", response,
             ", headers: ", g_last_response_headers);
       return;
    }
@@ -545,7 +545,7 @@ void SendStatus()
    if((!sent || status != 200) && GetTickCount64() - g_last_status_warn_ms >= 30000)
    {
       g_last_status_warn_ms = GetTickCount64();
-      Print("JoeMoney heartbeat failed: login ", login, ", MT5 server '", server,
+      Print("SkuD heartbeat failed: login ", login, ", MT5 server '", server,
             "', terminal connected ", (TerminalInfoInteger(TERMINAL_CONNECTED) ? "yes" : "no"),
             ", account trade allowed ", (AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) ? "yes" : "no"),
             ", HTTP ", status, ", response: ", response, ", headers: ", g_last_response_headers);
@@ -611,7 +611,7 @@ void ReportPrices()
    if(StringLen(skipped) > 0 && GetTickCount64() - g_last_symbol_warn_ms >= 60000)
    {
       g_last_symbol_warn_ms = GetTickCount64();
-      Print("JoeMoney symbols unavailable in this terminal: ", skipped);
+      Print("SkuD symbols unavailable in this terminal: ", skipped);
    }
    if(reported == 0)
       return;
@@ -626,7 +626,7 @@ void ReportPrices()
    if(status != 200 && GetTickCount64() - g_last_report_warn_ms >= 60000)
    {
       g_last_report_warn_ms = GetTickCount64();
-      Print("JoeMoney price report failed, HTTP ", status, ", response: ", response,
+      Print("SkuD price report failed, HTTP ", status, ", response: ", response,
             ", headers: ", g_last_response_headers);
    }
 }

@@ -2,10 +2,10 @@ param([switch]$OpenMaster, [switch]$RefreshTerminals)
 
 $ErrorActionPreference = 'Stop'
 
-$masterDirectory = if ($env:JOEMONEY_TERMINAL_MASTER) {
-    $env:JOEMONEY_TERMINAL_MASTER
+$masterDirectory = if ($env:SKUD_TERMINAL_MASTER) {
+    $env:SKUD_TERMINAL_MASTER
 } else {
-    'C:\MT5Terminals\JoeMoneyMaster'
+    'C:\skud\mt5-master'
 }
 $masterExecutable = Join-Path $masterDirectory 'terminal64.exe'
 $shellExecutable = (Get-Process -Id $PID).Path
@@ -31,10 +31,10 @@ if ($OpenMaster) {
 
     Start-Process -FilePath $masterExecutable -ArgumentList '/portable' -WorkingDirectory $masterDirectory
     Write-Host 'Started the master MT5 terminal in portable mode.' -ForegroundColor Green
-    Write-Host 'Use the bridge key printed in the bridge window when configuring the EA.'
+    Write-Host 'Use the bridge key printed in the bridge window for the SkuD EA setup.'
     Write-Host 'Close the master after saving the chart template so it does not poll alongside account terminals.'
 }
 
 Write-Host ''
-Write-Host 'The bridge starts portable slot terminals for active registered accounts.'
+Write-Host 'The SkuD bridge starts portable slot terminals for active registered accounts.'
 Write-Host 'Keep the Caddy and bridge PowerShell windows open.'

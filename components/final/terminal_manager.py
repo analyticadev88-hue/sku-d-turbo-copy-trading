@@ -1,4 +1,4 @@
-"""Terminal provisioning and launching for the JoeMoney multi-account bridge.
+"""Terminal provisioning and launching for the SkuD multi-account bridge.
 
 Stdlib only. Owns everything that touches the Windows MT5 terminals:
 terminal slot assignment, startup.ini auto-login,
@@ -15,11 +15,11 @@ import threading
 import time
 from pathlib import Path
 
-TERMINALS_DIR = Path(os.environ.get("JOEMONEY_TERMINALS_DIR", r"C:\MT5Terminals\JoeMoney"))
-EA_SOURCE = os.environ.get("JOEMONEY_EA_SOURCE", "")
-CHART_TEMPLATE = os.environ.get("JOEMONEY_CHART_TEMPLATE", "")
-TERMINAL_MASTER = os.environ.get("JOEMONEY_TERMINAL_MASTER", "")
-LAUNCH_STAGGER_SEC = float(os.environ.get("JOEMONEY_LAUNCH_STAGGER_SEC", "5"))
+TERMINALS_DIR = Path(os.environ.get("SKUD_TERMINALS_DIR", r"C:\skud\terminals"))
+EA_SOURCE = os.environ.get("SKUD_EA_SOURCE", "")
+CHART_TEMPLATE = os.environ.get("SKUD_CHART_TEMPLATE", "")
+TERMINAL_MASTER = os.environ.get("SKUD_TERMINAL_MASTER", r"C:\skud\mt5-master")
+LAUNCH_STAGGER_SEC = float(os.environ.get("SKUD_LAUNCH_STAGGER_SEC", "5"))
 
 _running_cache: tuple[set[str], float] = (set(), 0.0)
 _running_lock = threading.Lock()
@@ -67,7 +67,7 @@ def running_logins(ttl: float = 10.0) -> set[str]:
 
 
 def stop_managed_terminals(timeout_sec: int = 15) -> None:
-    """Close terminals launched from the managed JoeMoney slots directory only."""
+    """Close terminals launched from the managed SkuD slots directory only."""
     root = str(TERMINALS_DIR.resolve()).replace("'", "''").rstrip("\\") + "\\"
     ps_cmd = (
         f"$root = '{root}'; "
@@ -136,7 +136,7 @@ def assign_slot(used_folders: set[str]) -> Path:
     master = Path(TERMINAL_MASTER) if TERMINAL_MASTER else None
     if not master or not (master / "terminal64.exe").exists():
         raise RuntimeError(
-            "No free terminal slot and JOEMONEY_TERMINAL_MASTER is not configured to a folder "
+            "No free terminal slot and SKUD_TERMINAL_MASTER is not configured to a folder "
             "containing terminal64.exe. Seed the master terminal first."
         )
     TERMINALS_DIR.mkdir(parents=True, exist_ok=True)
@@ -161,7 +161,7 @@ def sync_chart_token(chart_path: Path) -> None:
     MT5 writes .chr files as UTF-16, so the encoding must be detected before
     editing; a plain text search would silently match nothing.
     """
-    token = os.environ.get("JOEMONEY_EA_TOKEN") or os.environ.get("JOEMONEY_BRIDGE_KEY") or ""
+    token = os.environ.get("SKUD_EA_TOKEN") or os.environ.get("SKUD_BRIDGE_KEY") or ""
     if not token or not chart_path.exists():
         return
     try:
@@ -229,7 +229,7 @@ def ensure_terminal(account: dict) -> tuple[bool, str]:
             shutil.copy2(CHART_TEMPLATE, target_chart)
             sync_chart_token(target_chart)
         else:
-            warnings.append("chart template not configured; attach the JoeMoney EA to a chart manually")
+            warnings.append("chart template not configured; attach the SkuD bridge EA to a chart manually")
         subprocess.Popen([str(exe), "/portable", f"/config:{folder / 'startup.ini'}"], cwd=str(folder), close_fds=True)
         return True, "; ".join(warnings) if warnings else "launched"
     except Exception as exc:

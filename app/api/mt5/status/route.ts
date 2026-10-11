@@ -20,8 +20,8 @@ export async function GET(request: Request) {
     return Response.json({ error: 'Invalid request origin.' }, { status: 403 })
   }
 
-  const bridgeUrl = process.env.JOEMONEY_BRIDGE_URL
-  const bridgeKey = process.env.JOEMONEY_BRIDGE_KEY
+  const bridgeUrl = process.env.SKUD_BRIDGE_URL
+  const bridgeKey = process.env.SKUD_BRIDGE_KEY
   if (!bridgeUrl || !bridgeKey) {
     return Response.json({ error: 'MT5 bridge configuration is incomplete.' }, { status: 503 })
   }

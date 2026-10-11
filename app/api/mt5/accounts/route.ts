@@ -28,18 +28,18 @@ export async function POST(request: Request) {
   if (origin && origin !== new URL(request.url).origin) {
     return jsonError('Invalid request origin.', 403)
   }
-  if (process.env.JOEMONEY_ALLOW_DEMO_STUDENT_ENROLLMENT !== 'true') {
+  if (process.env.SKUD_ALLOW_DEMO_STUDENT_ENROLLMENT !== 'true') {
     return jsonError('Student enrollment is disabled on this deployment.', 503)
   }
 
-  const bridgeUrl = process.env.JOEMONEY_BRIDGE_URL
-  const bridgeKey = process.env.JOEMONEY_BRIDGE_KEY
-  const mentorId = process.env.JOEMONEY_DEFAULT_MENTOR_ID
+  const bridgeUrl = process.env.SKUD_BRIDGE_URL
+  const bridgeKey = process.env.SKUD_BRIDGE_KEY
+  const mentorId = process.env.SKUD_DEFAULT_MENTOR_ID
   if (!bridgeUrl || !bridgeKey || !mentorId) {
     return jsonError('MT5 bridge configuration is incomplete.', 503)
   }
 
-  const enrollmentCode = process.env.JOEMONEY_STUDENT_ENROLLMENT_CODE ?? ''
+  const enrollmentCode = process.env.SKUD_STUDENT_ENROLLMENT_CODE ?? ''
   if (!enrollmentCode) {
     return jsonError('Demo enrollment code is not configured.', 503)
   }
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
   if (!DERIV_SERVERS.includes(server)) {
     return jsonError('Choose a supported Deriv MT5 server.', 400)
   }
-  if (!server.includes('Demo') && process.env.JOEMONEY_ALLOW_LIVE_STUDENT_ACCOUNTS !== 'true') {
+  if (!server.includes('Demo') && process.env.SKUD_ALLOW_LIVE_STUDENT_ACCOUNTS !== 'true') {
     return jsonError('Live accounts are disabled. Use an MT5 demo account for this test.', 403)
   }
 

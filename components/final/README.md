@@ -1,289 +1,162 @@
-# JoeMoney Multi-Account MT5 Bridge
+# SkuD Turbo MT5 Bridge
 
-This package runs the MT5 execution side of the SkuD Turbo app on a Windows VPS
-(46.224.112.35). Clients enter their MT5 account details (login/password/server) in
-the PWA; the bridge stores them in a local SQLite database, starts one portable MT5
-terminal per account (auto-login via `startup.ini`, EA pre-attached via a chart
-profile), and routes order batches to the right terminal. The JoeMoney EA inside
-each terminal polls the bridge over loopback HTTP and submits orders inside MT5.
-One shared bridge key protects the API; it is baked into the private PWA build and
-the VPS, so clients never authenticate by hand.
+This folder contains the Windows VPS bridge for SkuD Turbo. It accepts demo MT5
+credentials from the website server API, starts one portable MT5 terminal per
+student account, and has the SkuD student EA execute mentor trade events. MT5
+passwords are currently stored unencrypted in the bridge SQLite database and
+terminal startup files. Use demo accounts on a controlled VPS only.
 
-## What it supports
+## VPS layout
 
-- Many MT5 accounts, each in its own portable terminal under `C:\MT5Terminals\JoeMoney\SlotNNN`.
-- One shared bridge key (`JOEMONEY_BRIDGE_KEY`) protects every endpoint; it is baked into the PWA build at build time.
-- Market BUY/SELL and broker-held BUY_LIMIT, SELL_LIMIT, BUY_STOP, SELL_STOP orders; one order object per position, up to 100 per batch, idempotent submission via `Idempotency-Key`.
-- Optional spot-based TP from the broker quote at execution time (BUY: ask + distance; SELL: bid - distance).
-- Terminal supervision: terminals are launched on registration, re-launched when orders arrive for a stopped terminal, and reconciled on bridge start (pre-warm on boot).
-- Optional `-RefreshTerminals` startup mode closes only portable MT5 processes under the managed JoeMoney slots folder, then refreshes and relaunches active accounts from the master EA/chart files.
-- Explicit per-account connection status from the EA heartbeat — bridge or EA polling alone does not mean the broker connection is up.
+- Bridge files and scripts: `C:\skud\final`
+- Master MT5 template: `C:\skud\mt5-master`
+- Student portable terminals: `C:\skud\terminals\SlotNNN`
+- Bridge database: `C:\skud\final\data\skud.sqlite3`
+- Persistent DPAPI bridge key: `C:\ProgramData\SkuD\bridge-key.dpapi`
+- Public bridge URL: `https://skud.toporapula.dev`
+- Website: `https://skudturbo.vercel.app`
 
-## VPS Setup and Run (Windows Server)
+`start-bridge.ps1` and `start-all.ps1` use these paths by default. Optional
+`SKUD_TERMINAL_MASTER`, `SKUD_TERMINALS_DIR`, `SKUD_EA_SOURCE`, and
+`SKUD_CHART_TEMPLATE` environment variables override them.
 
-These steps use the current deployment paths and domain: `C:\JoeMoney\final`,
-`C:\MT5Terminals\JoeMoneyMaster`, and `skud.toporapula.dev`. The master is a
-one-time template-building terminal. The bridge starts the per-account portable
-terminals.
+## 1. Prepare the master MT5 terminal
 
-### 1. Seed and open the master terminal
-
-The master folder was seeded by copying the installed MT5 folder. On a fresh
-server, copy it once with:
+Copy the installed MT5 terminal into the SkuD master directory once:
 
 ```powershell
-robocopy "C:\Program Files\MetaTrader 5" "C:\MT5Terminals\JoeMoneyMaster" /E
+New-Item -ItemType Directory -Force C:\skud\mt5-master | Out-Null
+robocopy "C:\Program Files\MetaTrader 5" "C:\skud\mt5-master" /E
 ```
 
-Do not repeat the copy over a configured master unless you intend to refresh it.
-Open the master in portable mode from a PowerShell window:
+Open it in portable mode:
 
 ```powershell
-& "C:\MT5Terminals\JoeMoneyMaster\terminal64.exe" /portable
+& C:\skud\mt5-master\terminal64.exe /portable
 ```
 
-Log in once so MT5 caches the broker server, then log out. If Caddy and the bridge
-are already running, use this command by itself; do not run `start-all.ps1` again.
+Log in to a Deriv demo account to cache the server, then log out. Keep this
+master terminal separate from student terminals. Do not place it under the
+student slots directory.
 
-To refresh all running JoeMoney account terminals after updating the master EA or
-chart profile, stop the current bridge window, then run:
+## 2. Compile and save the SkuD EA template
+
+1. Copy `SkuDTurboBridgeEA.mq5` to
+   `C:\skud\mt5-master\MQL5\Experts\SkuDTurboBridgeEA.mq5`. Compile it in
+   MetaEditor with **F7**, leaving the EA input `EaToken` blank in the master
+   template. Confirm
+   `C:\skud\mt5-master\MQL5\Experts\SkuDTurboBridgeEA.ex5` exists.
+2. Attach `SkuDTurboBridgeEA` to a chart in the master terminal. Set
+   `BridgeUrl` to `http://127.0.0.1:8765`, enable Algo Trading, and allow
+   WebRequest to `http://127.0.0.1:8765`.
+3. Save the chart profile as `SkuD`, then close the master terminal. Confirm
+   `C:\skud\mt5-master\MQL5\Profiles\Charts\SkuD\chart01.chr` exists.
+4. Start `C:\skud\final\start-bridge.ps1`. It generates or reads the persistent
+   bridge key and prints it once. Set that value as `SKUD_BRIDGE_KEY` in the
+   Vercel server environment. Never put this key in a `NEXT_PUBLIC_` variable or
+   source control. On provisioning, the launcher injects it into each copied
+   student chart profile. Restart the bridge after setting its server-side key.
+
+The bridge copies this EA and chart file into each newly provisioned student
+terminal. Each slot receives its own `startup.ini` with that student's login,
+password, and broker server. Do not add student credentials to the master
+profile.
+
+## 3. DNS, Caddy, and firewall
+
+The Caddyfile serves `skud.toporapula.dev` and proxies to
+`127.0.0.1:8765`. Its A record must point to `46.224.112.35`. Keep the existing
+JoeMoney hostname `bridge.toporapula.dev` unchanged. Allow inbound TCP 80 and
+443 in Windows Firewall and the VPS provider firewall; do not expose port 8765.
+
+The DNS zone must authorize Caddy's certificate issuer. Add
+`CAA 0 issue "letsencrypt.org"` alongside existing CAA records if it is not
+already allowed. Place `caddy.exe` in `C:\skud\final`, `C:\Caddy`, or on PATH.
+
+Check the bridge after startup:
 
 ```powershell
-& "C:\JoeMoney\final\start-bridge.ps1" -RefreshTerminals
+Invoke-RestMethod https://skud.toporapula.dev/health
 ```
 
-This closes terminal processes whose executable is under
-`C:\MT5Terminals\JoeMoney\`, then recopies the configured EX5/chart template and
-relaunches active accounts. It does not close the master terminal or MT5 processes
-outside that folder. Open broker positions remain at the broker, but the terminals
-will be disconnected briefly. Update/compile the master EX5 and save its chart
-template before running the refresh.
+The unauthenticated account endpoint should return `Unauthorized` in a browser;
+that is expected. The health endpoint should return `status: ok`.
 
-### 2. Compile the EA and save the master chart
+## 4. Vercel server environment
 
-1. Copy the EA source into the master terminal's Experts folder:
-
-   ```powershell
-   Copy-Item "C:\JoeMoney\final\JoeMoneyBridgeEA.mq5" "C:\MT5Terminals\JoeMoneyMaster\MQL5\Experts\JoeMoneyBridgeEA.mq5" -Force
-   ```
-
-   Open that copy in MetaEditor and press **F7**. Confirm the compiled file exists at
-   `C:\MT5Terminals\JoeMoneyMaster\MQL5\Experts\JoeMoneyBridgeEA.ex5`.
-2. Read the current bridge key from the already-running bridge PowerShell window.
-   If the bridge is not running, open `C:\JoeMoney\final` and run
-   `.start-all.ps1` once; keep its Caddy and bridge windows open. Use the key
-   printed by the bridge. Keep it server-side as `JOEMONEY_BRIDGE_KEY` in the
-   Vercel project environment; the bridge EA must use the matching `EaToken`.
-   Do not use a `NEXT_PUBLIC_` or `VITE_` variable for this key.
-3. In the master MT5, open a chart and attach `JoeMoneyBridgeEA`. Set
-   `BridgeUrl` to `http://127.0.0.1:8765` and `EaToken` to the current bridge key.
-   Enable **Algo Trading**. In MT5 Options > Expert Advisors, allow WebRequest to
-   `http://127.0.0.1:8765`.
-4. Save the profile with **File > Profiles > Save As**, named `JoeMoney`. Close the
-   master MT5, then copy:
-
-   ```text
-   C:\MT5Terminals\JoeMoneyMaster\MQL5\Profiles\Charts\JoeMoney\chart01.chr
-   ```
-
-   to:
-
-   ```text
-   C:\MT5Terminals\JoeMoneyMaster\MQL5\Profiles\Charts\Default\chart01.chr
-   ```
-
-   The MT5 profile stores its chart as `chart01.chr` inside the `JoeMoney` profile
-   folder. Do not rename the file. The bridge reads it from
-   `Charts\JoeMoney\chart01.chr` and copies it into each account slot's
-   `Charts\Default\chart01.chr` before launching that portable terminal. This
-   carries the EA/chart inputs into new slots. Keep the master closed during
-   normal operation so it does not run an extra EA instance.
-
-### 3. DNS, Caddy, and firewall
-
-1. Create an A record for `skud.toporapula.dev` pointing to `46.224.112.35`.
-   Keep the existing `bridge.toporapula.dev` record unchanged for JoeMoney.
-   The DNS zone must allow Caddy's certificate authority: add a CAA record
-   `0 issue "letsencrypt.org"` alongside existing CAA records, otherwise Caddy
-   will be blocked from issuing its HTTPS certificate.
-2. Caddy needs no installer. Put the downloaded Windows executable, named exactly
-   `caddy.exe`, at `C:\JoeMoney\final\caddy.exe` or `C:\Caddy\caddy.exe`.
-   `start-caddy.ps1` also checks `PATH`.
-3. Allow inbound TCP ports **80** and **443** in Windows Firewall. For example,
-   from Administrator PowerShell:
-
-   ```powershell
-   New-NetFirewallRule -DisplayName "Caddy HTTP" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow
-   New-NetFirewallRule -DisplayName "Caddy HTTPS" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow
-   ```
-
-   Allow these ports in the VPS provider firewall/security settings too, if enabled.
-   Leave port `8765` private. Caddy serves HTTPS and renews its certificate.
-   This deployment obtained its certificate successfully after public access to
-   ports 80/443 was allowed; earlier timeout messages in the log were from before
-   that change.
-
-### 4. Set Vercel environment variables
-
-Set these server-only variables in the `skudturbo.vercel.app` Vercel project and
-redeploy after changing them. Never expose bridge keys as public/client variables:
+Set these **server-only** variables on the `skudturbo.vercel.app` Vercel project,
+then redeploy. Use separate random values for the bridge key, demo enrollment
+code, and mentor setup code.
 
 ```text
-JOEMONEY_BRIDGE_URL=https://skud.toporapula.dev
-JOEMONEY_BRIDGE_KEY=<current key printed by start-bridge.ps1>
-JOEMONEY_DEFAULT_MENTOR_ID=mentor-skud-01
-JOEMONEY_STUDENT_ENROLLMENT_CODE=<separate long random demo invite code>
-JOEMONEY_ALLOW_DEMO_STUDENT_ENROLLMENT=true
-JOEMONEY_ALLOW_LIVE_STUDENT_ACCOUNTS=false
-JOEMONEY_MENTOR_SETUP_CODE=<separate long random operator code>
+SKUD_BRIDGE_URL=https://skud.toporapula.dev
+SKUD_BRIDGE_KEY=<same key used by bridge and EA>
+SKUD_DEFAULT_MENTOR_ID=mentor-skud-01
+SKUD_STUDENT_ENROLLMENT_CODE=<separate long random demo invite code>
+SKUD_ALLOW_DEMO_STUDENT_ENROLLMENT=true
+SKUD_ALLOW_LIVE_STUDENT_ACCOUNTS=false
+SKUD_MENTOR_SETUP_CODE=<separate long random operator code>
 ```
 
-Use the same bridge key for the website server and bridge, while keeping the
-student enrollment code and mentor setup code separate from that key. Keep live
-account enrollment disabled for this demo.
+Never enable live student accounts for this pilot. The bridge key is server-only;
+students only receive the separate enrollment code.
 
-The bridge saves its DPAPI-protected key at
-`C:\ProgramData\JoeMoney\bridge-key.dpapi`, outside the app folder, and reuses it
-on later starts and app updates. Run the bridge under the same Windows account
-that created the key. The EA `EaToken` and website server's `JOEMONEY_BRIDGE_KEY`
-must match; do
-not rotate either unless the saved key has intentionally been replaced. If an old
-key file is migrated from `C:\JoeMoney\final\secrets`, the bridge reports that
-migration. If the stable key cannot be decrypted, startup stops with an error
-instead of silently issuing a different key.
+## 5. Start the SkuD services
 
-Opening `https://skud.toporapula.dev/v1/accounts` in a browser without an API
-key returns `{"error":"Unauthorized"}`. That is expected and confirms HTTPS
-reached the authenticated bridge.
-
-### 5. Start normally and apply the template to existing slots
-
-When services are stopped, start normal operation from `C:\JoeMoney\final` with:
+Allow inbound HTTP and HTTPS in Windows Firewall if the VPS firewall does not
+already allow them:
 
 ```powershell
+New-NetFirewallRule -DisplayName "SkuD Caddy HTTP" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow
+New-NetFirewallRule -DisplayName "SkuD Caddy HTTPS" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow
+```
+
+Then start both services from the uploaded folder:
+
+```powershell
+Set-Location C:\skud\final
 .\start-all.ps1
 ```
 
-It opens Caddy and the bridge in separate PowerShell windows. Keep both open. The
-bridge reconciles active registered accounts and starts their portable MT5 slot
-terminals. Do not manually start slot terminals or rerun `start-all.ps1` while the
-services are already running, as that can cause port conflicts.
+Keep the Caddy and bridge windows open. The master terminal is a template only;
+leave it closed while student slots are operating. Do not run `start-all.ps1` a
+second time while services are already running.
 
-A slot already running when the chart file is installed will not automatically
-load the new template. Close the account's slot terminal, then restart only the
-bridge: press **Ctrl+C** in the bridge window and run this from
-`C:\JoeMoney\final`:
+Run the read-only audit at any time:
 
 ```powershell
-.\start-bridge.ps1
+Set-Location C:\skud\final
+.\audit-vps.ps1
 ```
 
-The bridge relaunches active accounts and copies the chart template into their
-slots. Leave Caddy running; it does not need restarting. Alternatively, attach the
-EA manually to an already-running slot chart.
+## 6. Register the mentor and test a demo student
 
-For manual startup after both services have stopped, use `start-caddy.ps1` in one
-PowerShell window and `start-bridge.ps1` in another. Do not run these alongside
-`start-all.ps1`.
+After the bridge health check succeeds, register the mentor through the
+protected `POST /api/admin/mentors` route using `SKUD_MENTOR_SETUP_CODE`. The
+response returns a one-time `mentorToken`; enter that value in
+`SkuDTurboMentorEA.mq5` on the mentor's demo account. Compile the mentor EA and
+allow WebRequest to `https://skud.toporapula.dev` in MT5.
 
-## Test the bridge
+Enable demo enrollment only after mentor registration and the student EA/chart
+template are ready. Submit a Deriv demo login, trading password, server, and
+student enrollment code from the website. The dashboard should show the actual
+login/server and wait for a matching EA heartbeat before reporting connected.
+Verify the test account and copied trades in MT5 before inviting anyone else.
 
-Before moving it to the VPS, run the unit tests locally (terminal launching and process detection are mocked):
+Run bridge regression tests from this folder:
 
 ```powershell
-python -m unittest discover -s final -v
+python -m unittest discover -s . -p test_bridge.py -v
 ```
 
-## PWA flow
+## Security and limitations
 
-Open the installed PWA → **MT5 Credentials** on the splash screen (or `/mt5`) →
-enter the account (MT5 login, password, server) → **Connect**. If the bridge key is
-not baked into the build, paste it once when asked.
-The VPS launches and logs in a terminal for it; the account list shows green when
-the terminal is up and the EA heartbeat is live. Select an account, build the order
-ladder, and queue. The PWA polls each order until the EA acknowledges it. A queued
-response means "accepted by the bridge", not "executed" — confirm trades in MT5.
-
-## SkuD mentor/student copy pilot
-
-The bridge supports one-source-to-many-student demo copying for market opens and
-full position closes. Events are deduplicated by mentor ID and MT5 deal ticket;
-each student terminal executes and acknowledges its own order. The mentor may use
-a different broker/server from students, but the symbol name must currently be
-identical at every broker. Symbol mapping and lot scaling are not implemented.
-
-### Register the source mentor
-
-Set the server-only variables from `.env.example`, including
-`JOEMONEY_BRIDGE_URL`, `JOEMONEY_BRIDGE_KEY`, and `JOEMONEY_MENTOR_SETUP_CODE`.
-Keep them out of client bundles and source control. Call the protected
-`POST /api/admin/mentors` route with `x-mentor-setup-code` and body
-`{"mentorId":"mentor-skud-01","mentorName":"SkudTurbo","login":"...","server":"..."}`.
-It returns a one-time `mentorToken`; enter it in the mentor EA's `MentorToken`
-input. ID, name, URL, token, login, and server must match the registration.
-Registering again rotates the token, so update the EA at the same time.
-
-Compile `JoeMoneyMentorEA.mq5` in MetaEditor and attach it only to the source
-account on the mentor's local PC. Set `MentorId` and `MentorName` there. Allow
-WebRequest to the configured HTTPS bridge URL in MT5. Never give a student the
-mentor token or the global bridge key.
-
-### Enroll demo students
-
-Configure `JOEMONEY_DEFAULT_MENTOR_ID`, set
-`JOEMONEY_ALLOW_DEMO_STUDENT_ENROLLMENT=true`, and set a separate long random
-`JOEMONEY_STUDENT_ENROLLMENT_CODE`. Keep
-`JOEMONEY_ALLOW_LIVE_STUDENT_ACCOUNTS=false`. The student modal sends the MT5
-login, trading password, server, and enrollment code to the same-origin Next.js
-route; that server route alone holds the bridge key. Student servers are
-currently restricted to the Deriv server list in the storefront. The bridge
-starts a managed student terminal, and the UI waits for a fresh EA heartbeat
-whose server matches the submitted server.
-
-The bridge currently stores MT5 passwords in plaintext in its SQLite database
-and `startup.ini` files. This pilot is for demo accounts on a controlled VPS
-only. Do not accept live credentials until credential encryption, per-user
-authentication, rate limiting, account ownership, and operational access
-controls are in place.
-
-### Current copy limitations
-
-- Copies market opens and full closes; pending orders, partial closes, SL/TP changes, and history backfill are not copied.
-- Student volume currently matches the mentor volume and is subject to student broker limits.
-- Brokers with different symbol suffixes need explicit symbol mapping before use.
-- Confirm successful student execution in MT5; identical fills are not guaranteed.
-- Mentor event retry buffering is in EA memory; a mentor terminal restart can lose unsent events.
-
-Run `python -m unittest discover -s components/final -v` for bridge tests. Compile
-both EAs in MetaEditor and verify the complete flow on demo accounts before
-inviting students or enabling any live account.
-
-## Protocol
-
-- `POST /v1/accounts`: `{login, password, server, mentor_id?}` → provision/update a student account and launch its terminal. Passwords are stored in the local SQLite database (plaintext, per deployment decision) and are never returned.
-- `POST /v1/mentors`: operator registration `{mentor_id, mentor_name, login, server}` → creates/updates the source identity and returns a one-time mentor token.
-- `POST /v1/mentor/events`: authenticated mentor EA event → deduplicates and fans market opens/full closes out to active student accounts assigned to that mentor.
-- `GET /v1/accounts`: account list with terminal/EA status, no secrets.
-- `POST /v1/accounts/{login}/deactivate`: stops trading for that account.
-- `POST /v1/orders`: `{login, orders:[...]}` with `Idempotency-Key`.
-- `GET /v1/orders/{id}`: order status.
-- `GET /v1/commands/next?login=...` (student EA): atomically claims the oldest queued command for that login; payload includes the order settings, stop-loss settings, and trusted mentor display name.
-- `POST /v1/commands/{id}/result` (EA): `placed`/`rejected` acknowledgement with ticket and message.
-- `POST /v1/terminal/status` (EA): per-login heartbeat. `connected=true` means the terminal is online **and** the account login succeeded; a failed login never produces an authorized heartbeat for the registered login (it is refused), so the PWA's "pending" state flips to "connected" only after a real MT5 login. `GET /v1/status?login=` (client) reads it.
-- `POST /v1/prices` (EA): `{login, ticks:[{symbol,bid,ask}, ...]}` (1-200). The EA reports live ticks for its `ReportSymbols` input every `ReportSeconds` (default 3s); unknown logins are refused.
-- `GET /v1/prices` (client): `?login=` and `?symbols=A,B` filters → `{prices:[{login,symbol,bid,ask,age_sec}], now}`. The PWA polls this every 4s and prefers these MT5 quotes over Deriv WebSocket ticks whenever a tick is under 60s old; 30-60s is shown grayed out as degraded.
-
-## Warnings
-
-- **Do not use on live accounts until hardened.** Broker passwords are stored
-  unencrypted in `data\joemoney.sqlite3`; anyone with read access to the VPS or a
-  copy of the database can trade those accounts. Encryption at rest, real user
-  authentication, credential rotation, and administrative kill controls are listed
-  as production work in the original demo README and still apply.
-- The HTTP response means "queued", not "executed". If the EA is offline, commands
-  remain queued until it reconnects; inspect the queue/account before restarting or
-  resubmitting.
-- For multiple same-symbol fills to remain separate positions, the MT5 account must
-  use **hedging** mode; netting accounts combine fills.
-- MT5 first-run dialogs (LiveUpdate, news) can delay EA startup; queued orders wait
-  for the EA, and `start-bridge.ps1` reconciles terminals on every bridge start.
+- MT5 passwords are stored in plaintext in `data\skud.sqlite3` and slot
+  `startup.ini` files. This is demo-only until encryption at rest, user
+  authentication, rate limiting, and access controls are implemented.
+- The bridge response means a command was accepted, not that a broker executed
+  it. Confirm fills and account state in MT5.
+- Copy support currently covers market opens and full closes. Symbol mapping,
+  lot scaling, pending order changes, partial closes, and SL/TP modifications
+  are not implemented.
+- Do not share bridge keys, mentor tokens, or MT5 passwords.

@@ -1,10 +1,10 @@
-"""JoeMoney MT5 command bridge. Uses only the Python standard library.
+"""SkuD MT5 command bridge. Uses only the Python standard library.
 
-A single static bridge key (JOEMONEY_BRIDGE_KEY) protects every endpoint; the same
+A single static bridge key (SKUD_BRIDGE_KEY) protects every endpoint; the same
 key is baked into the private PWA build, so clients never authenticate by hand.
 MT5 accounts are registered over HTTPS; the bridge stores credentials in the local
 SQLite database, launches portable MT5 terminals with startup.ini auto-login, and
-queues orders and close requests per account. The JoeMoney EA inside each terminal polls locally,
+queues orders and close requests per account. The SkuD EA inside each terminal polls locally,
 claims its account's commands, and executes them in MT5.
 """
 
@@ -30,10 +30,10 @@ from uuid import uuid4
 import terminal_manager as tm
 
 ROOT = Path(__file__).resolve().parent
-DB_PATH = Path(os.environ.get("JOEMONEY_DB_PATH", ROOT / "joemoney.sqlite3"))
-BRIDGE_KEY = os.environ.get("JOEMONEY_BRIDGE_KEY", "")
-EA_TOKEN = os.environ.get("JOEMONEY_EA_TOKEN", "")
-ALLOWED_ORIGIN = os.environ.get("JOEMONEY_ALLOWED_ORIGIN", "http://localhost:3000")
+DB_PATH = Path(os.environ.get("SKUD_DB_PATH", ROOT / "data" / "skud.sqlite3"))
+BRIDGE_KEY = os.environ.get("SKUD_BRIDGE_KEY", "")
+EA_TOKEN = os.environ.get("SKUD_EA_TOKEN", "")
+ALLOWED_ORIGIN = os.environ.get("SKUD_ALLOWED_ORIGIN", "http://localhost:3000")
 MAX_BATCH_SIZE = 100
 MAX_TICK_BATCH_SIZE = 200
 ORDER_TYPES = {
@@ -484,7 +484,7 @@ def reconcile_on_boot(force_refresh: bool = False) -> None:
 
 
 class BridgeHandler(BaseHTTPRequestHandler):
-    server_version = "JoeMoneyBridge/2.2"
+    server_version = "SkuDBridge/2.2"
 
     def log_message(self, fmt: str, *args: object) -> None:
         print(f"[{self.log_date_time_string()}] {fmt % args}")
@@ -534,7 +534,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
         if parsed.path == "/health":
-            return self._send(200, {"status": "ok", "service": "JoeMoney MT5 bridge"})
+            return self._send(200, {"status": "ok", "service": "SkuD MT5 bridge"})
         if parsed.path == "/v1/status":
             if not client_authed(self.headers.get("Authorization", "")):
                 return self._send(401, {"error": "Unauthorized"})
@@ -570,7 +570,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                         "currency": row["currency"] if row else "",
                     })
                 count = db.execute("SELECT COUNT(*) AS c FROM accounts WHERE is_active=1").fetchone()["c"]
-            return self._send(200, {"status": "ok", "service": "JoeMoney MT5 bridge", "active_accounts": count})
+            return self._send(200, {"status": "ok", "service": "SkuD MT5 bridge", "active_accounts": count})
         if parsed.path == "/v1/accounts":
             if not client_authed(self.headers.get("Authorization", "")):
                 return self._send(401, {"error": "Unauthorized"})
@@ -593,7 +593,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                             heartbeat and heartbeat["connected"] and now - heartbeat["last_seen"] < HEARTBEAT_STALE_SEC
                         ),
                         "last_seen": heartbeat["last_seen"] if heartbeat else None,
-                        "message": heartbeat["message"] if heartbeat else "Waiting for the JoeMoney EA heartbeat.",
+                        "message": heartbeat["message"] if heartbeat else "Waiting for the SkuD EA heartbeat.",
                     })
             return self._send(200, {"accounts": accounts})
         if parsed.path == "/v1/prices":
@@ -658,7 +658,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             with db_session() as db:
                 account = db.execute("SELECT is_active FROM accounts WHERE login=?", (login,)).fetchone()
                 if not account:
-                    return self._send(403, {"error": "EA login is not a registered JoeMoney account."})
+                    return self._send(403, {"error": "EA login is not a registered SkuD account."})
                 if not account["is_active"]:
                     return self._send(403, {"error": "MT5 account is deactivated."})
                 db.execute("BEGIN IMMEDIATE")
@@ -685,7 +685,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             with db_session() as db:
                 account = db.execute("SELECT is_active FROM accounts WHERE login=?", (login,)).fetchone()
                 if not account:
-                    return self._send(403, {"error": "EA login is not a registered JoeMoney account."})
+                    return self._send(403, {"error": "EA login is not a registered SkuD account."})
                 if not account["is_active"]:
                     return self._send(403, {"error": "MT5 account is deactivated."})
                 db.execute("BEGIN IMMEDIATE")
@@ -1096,7 +1096,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             with db_session() as db:
                 known = db.execute("SELECT 1 FROM accounts WHERE login=?", (login,)).fetchone()
                 if not known:
-                    return self._send(403, {"error": "Price login is not a registered JoeMoney account."})
+                    return self._send(403, {"error": "Price login is not a registered SkuD account."})
                 now = time.time()
                 db.executemany(
                                         "INSERT INTO prices(login,symbol,bid,ask,volume_min,volume_max,volume_step,volume_limits_known,updated_at) VALUES(?,?,?,?,?,?,?,?,?) "
@@ -1134,7 +1134,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             with db_session() as db:
                 known = db.execute("SELECT 1 FROM accounts WHERE login=?", (login,)).fetchone()
                 if not known:
-                    return self._send(403, {"error": "Heartbeat login is not a registered JoeMoney account."})
+                    return self._send(403, {"error": "Heartbeat login is not a registered SkuD account."})
                 db.execute(
                     "INSERT INTO terminal_status(login,connected,last_seen,message,server,balance,currency) VALUES(?,?,?,?,?,?,?) "
                     "ON CONFLICT(login) DO UPDATE SET connected=excluded.connected,last_seen=excluded.last_seen,"
@@ -1147,15 +1147,15 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     if len(BRIDGE_KEY) < 32:
-        raise SystemExit("Set JOEMONEY_BRIDGE_KEY (32+ characters) before starting.")
+        raise SystemExit("Set SKUD_BRIDGE_KEY (32+ characters) before starting.")
     with db_session():
         pass
-    if os.environ.get("JOEMONEY_RECONCILE_ON_BOOT", "1") == "1":
+    if os.environ.get("SKUD_RECONCILE_ON_BOOT", "1") == "1":
         reconcile_on_boot()
-    host = os.environ.get("JOEMONEY_HOST", "127.0.0.1")
-    port = int(os.environ.get("JOEMONEY_PORT", "8765"))
+    host = os.environ.get("SKUD_HOST", "127.0.0.1")
+    port = int(os.environ.get("SKUD_PORT", "8765"))
     server = ThreadingHTTPServer((host, port), BridgeHandler)
-    print("JoeMoney bridge listening at http://%s:%d" % (host, port))
+    print("SkuD bridge listening at http://%s:%d" % (host, port))
     server.serve_forever()
 
 

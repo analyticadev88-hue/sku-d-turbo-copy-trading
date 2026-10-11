@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 try {
 Set-Location $PSScriptRoot
 
-$secretsDirectory = Join-Path $env:ProgramData 'JoeMoney'
+$secretsDirectory = Join-Path $env:ProgramData 'SkuD'
 New-Item -ItemType Directory -Force -Path $secretsDirectory | Out-Null
 
 function Get-OrCreateProtectedToken([string]$Name) {
@@ -26,7 +26,7 @@ function Get-OrCreateProtectedToken([string]$Name) {
         } catch {
             $backupPath = "$legacyPath.invalid.$(Get-Date -Format 'yyyyMMddHHmmss').bak"
             Move-Item -LiteralPath $legacyPath -Destination $backupPath
-            Write-Warning "The old $Name file could not be decrypted. It was backed up to $backupPath; a new persistent key will be created once. Update the PWA key and EA chart input to match it."
+            Write-Warning "The old $Name file could not be decrypted. It was backed up to $backupPath; a new persistent key will be created once. Update the Vercel server key and SkuD EA chart input to match it."
         }
     }
 
@@ -44,49 +44,49 @@ function Get-OrCreateProtectedToken([string]$Name) {
     }
 }
 
-# --- Terminal infrastructure (seed once on the VPS, see README) ---
-# Defaults match the runbook: master terminal at C:\MT5Terminals\JoeMoneyMaster.
+# --- SkuD terminal infrastructure (seed once on the VPS, see README) ---
+# Defaults match the runbook: master terminal at C:\skud\mt5-master.
 # Override any of them with environment variables before running this script.
-$terminalsDir    = if ($env:JOEMONEY_TERMINALS_DIR)    { $env:JOEMONEY_TERMINALS_DIR }    else { 'C:\MT5Terminals\JoeMoney' }
-$terminalMaster  = if ($env:JOEMONEY_TERMINAL_MASTER)  { $env:JOEMONEY_TERMINAL_MASTER }  else { 'C:\MT5Terminals\JoeMoneyMaster' }
-$eaSource        = if ($env:JOEMONEY_EA_SOURCE)        { $env:JOEMONEY_EA_SOURCE }        else { 'C:\MT5Terminals\JoeMoneyMaster\MQL5\Experts\JoeMoneyBridgeEA.ex5' }
-$chartTemplate   = if ($env:JOEMONEY_CHART_TEMPLATE)   { $env:JOEMONEY_CHART_TEMPLATE }   else { 'C:\MT5Terminals\JoeMoneyMaster\MQL5\Profiles\Charts\JoeMoney\chart01.chr' }
+$terminalsDir    = if ($env:SKUD_TERMINALS_DIR)    { $env:SKUD_TERMINALS_DIR }    else { 'C:\skud\terminals' }
+$terminalMaster  = if ($env:SKUD_TERMINAL_MASTER)  { $env:SKUD_TERMINAL_MASTER }  else { 'C:\skud\mt5-master' }
+$eaSource        = if ($env:SKUD_EA_SOURCE)        { $env:SKUD_EA_SOURCE }        else { 'C:\skud\mt5-master\MQL5\Experts\SkuDTurboBridgeEA.ex5' }
+$chartTemplate   = if ($env:SKUD_CHART_TEMPLATE)   { $env:SKUD_CHART_TEMPLATE }   else { 'C:\skud\mt5-master\MQL5\Profiles\Charts\SkuD\chart01.chr' }
 
 New-Item -ItemType Directory -Force -Path $terminalsDir | Out-Null
 if (-not (Test-Path (Join-Path $terminalMaster 'terminal64.exe'))) {
     throw "Master terminal not found at $terminalMaster. Seed it per README section C (copy the MT5 install there and run terminal64.exe /portable once)."
 }
 if (-not (Test-Path $eaSource)) {
-    throw "Compiled EA not found at $eaSource. Copy JoeMoneyBridgeEA.mq5 into the master terminal's MQL5\Experts and compile with F7 in MetaEditor."
+    throw "Compiled EA not found at $eaSource. Copy SkuDTurboBridgeEA.mq5 into the master terminal's MQL5\Experts and compile with F7 in MetaEditor."
 }
 if (-not (Test-Path $chartTemplate)) {
     Write-Warning "Chart template not found at $chartTemplate. Terminals launch without an auto-attached EA; attach the EA to a chart manually in each terminal (README step 8)."
 }
 
-$env:JOEMONEY_TERMINALS_DIR   = $terminalsDir
-$env:JOEMONEY_TERMINAL_MASTER = $terminalMaster
-$env:JOEMONEY_EA_SOURCE       = $eaSource
-$env:JOEMONEY_CHART_TEMPLATE  = $chartTemplate
+$env:SKUD_TERMINALS_DIR   = $terminalsDir
+$env:SKUD_TERMINAL_MASTER = $terminalMaster
+$env:SKUD_EA_SOURCE       = $eaSource
+$env:SKUD_CHART_TEMPLATE  = $chartTemplate
 
 # One shared key protects the bridge and EA. It is created once, DPAPI-protected
 # for this Windows user, and stored outside the app folder for reuse after updates.
 $bridgeKey = Get-OrCreateProtectedToken 'bridge-key'
-$env:JOEMONEY_BRIDGE_KEY = $bridgeKey
-$env:JOEMONEY_EA_TOKEN = $bridgeKey
-$env:JOEMONEY_ALLOWED_ORIGIN = 'https://skudturbo.vercel.app'
-$env:JOEMONEY_HOST = '127.0.0.1'
-$env:JOEMONEY_PORT = '8765'
-$env:JOEMONEY_DB_PATH = Join-Path $PSScriptRoot 'data\joemoney.sqlite3'
-New-Item -ItemType Directory -Force -Path (Split-Path $env:JOEMONEY_DB_PATH) | Out-Null
+$env:SKUD_BRIDGE_KEY = $bridgeKey
+$env:SKUD_EA_TOKEN = $bridgeKey
+$env:SKUD_ALLOWED_ORIGIN = 'https://skudturbo.vercel.app'
+$env:SKUD_HOST = '127.0.0.1'
+$env:SKUD_PORT = '8765'
+$env:SKUD_DB_PATH = Join-Path $PSScriptRoot 'data\skud.sqlite3'
+New-Item -ItemType Directory -Force -Path (Split-Path $env:SKUD_DB_PATH) | Out-Null
 
 Write-Host ''
-Write-Host 'JoeMoney bridge is starting.' -ForegroundColor Green
-Write-Host 'Bridge key (set as JOEMONEY_BRIDGE_KEY in the Vercel server environment; keep it server-only. The bridge EA must use the matching token.):' -ForegroundColor Yellow
+Write-Host 'SkuD MT5 bridge is starting.' -ForegroundColor Green
+Write-Host 'Bridge key (set as SKUD_BRIDGE_KEY in the Vercel server environment; keep it server-only. The SkuD bridge EA must use the matching token.):' -ForegroundColor Yellow
 Write-Host $bridgeKey
 Write-Host ''
 Write-Host 'Re-launching terminals for active accounts that are not running...' -ForegroundColor DarkGray
 if ($RefreshTerminals) {
-    Write-Warning 'Refresh requested: all terminal64.exe processes under the managed JoeMoney slots directory will be closed, refreshed from the master EA/chart files, and restarted. Positions already held by the broker remain open, but monitoring is interrupted briefly.'
+    Write-Warning 'Refresh requested: all terminal64.exe processes under the managed SkuD slots directory will be closed, refreshed from the master EA/chart files, and restarted. Positions already held by the broker remain open, but monitoring is interrupted briefly.'
 }
 $refreshValue = if ($RefreshTerminals) { 'True' } else { 'False' }
 & python -c "import bridge; bridge.reconcile_on_boot(force_refresh=$refreshValue)"
