@@ -29,12 +29,47 @@ const DERIV_SERVERS = [
 export function CheckoutReturn() {
   const [isConnectOpen, setIsConnectOpen] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [formMessage, setFormMessage] = useState<string | null>(null)
 
-  function handleAccountSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleAccountSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = event.currentTarget
-    form.reset()
-    window.location.assign('/dashboard?preview=1')
+    const formData = new FormData(form)
+    const login = String(formData.get('login') ?? '').trim()
+    const password = String(formData.get('password') ?? '')
+    const server = String(formData.get('server') ?? '')
+    setIsSubmitting(true)
+    setFormMessage('Submitting account to the MT5 bridge...')
+
+    try {
+      const response = await fetch('/api/mt5/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ login, password, server }),
+      })
+      const result = await response.json() as {
+        error?: string
+        login?: string
+        server?: string
+        statusToken?: string
+      }
+      if (!response.ok) throw new Error(result.error ?? 'Could not submit the MT5 account.')
+      if (!result.login || !result.server || !result.statusToken) {
+        throw new Error('The MT5 bridge returned incomplete account status details.')
+      }
+
+      sessionStorage.setItem('skud-mt5-account', JSON.stringify({
+        login: result.login,
+        server: result.server,
+        statusToken: result.statusToken,
+      }))
+      form.reset()
+      window.location.assign('/dashboard?portal=1')
+    } catch (error) {
+      setFormMessage(error instanceof Error ? error.message : 'Could not submit the MT5 account.')
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -69,7 +104,7 @@ export function CheckoutReturn() {
             Connect your MT5 student account.
           </h1>
           <p className="mt-6 max-w-lg text-pretty leading-relaxed text-foreground/65">
-            Connect a Deriv MT5 demo account to your SkuD Turbo student terminal.
+            Connect your Deriv MT5 account to a managed SkuD Turbo student terminal.
           </p>
 
           <button
@@ -85,7 +120,7 @@ export function CheckoutReturn() {
           </button>
 
           <p className="mt-5 max-w-lg text-xs leading-relaxed text-foreground/45">
-            This checkout return does not confirm payment. MT5 demo credentials are sent to the managed student bridge for terminal login.
+            Your password is sent to the managed bridge to start the MT5 terminal. The dashboard shows your balance only after the Student EA confirms the broker login.
           </p>
         </div>
       </section>
@@ -96,7 +131,7 @@ export function CheckoutReturn() {
               <DialogHeader>
                 <DialogTitle className="text-xl font-extrabold">Connect an MT5 account</DialogTitle>
                 <DialogDescription>
-                  This is a dashboard preview step. Your account details will not be sent or saved yet.
+                  The server sends your MT5 credentials to the managed bridge. Your password is not returned to the browser or displayed in the dashboard.
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleAccountSubmit} className="flex flex-col gap-4">
@@ -157,13 +192,12 @@ export function CheckoutReturn() {
                 </div>
                 <button
                   type="submit"
+                  disabled={isSubmitting}
                   className="inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-5 text-sm font-extrabold text-white transition-colors hover:bg-primary/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
                 >
-                  Open dashboard preview
+                  {isSubmitting ? 'Connecting account...' : 'Connect MT5 account'}
                 </button>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Preview only. No MT5 connection is started and no credentials leave this page.
-                </p>
+                {formMessage && <p role="status" className="text-xs leading-relaxed text-muted-foreground">{formMessage}</p>}
               </form>
           </>
         </DialogContent>

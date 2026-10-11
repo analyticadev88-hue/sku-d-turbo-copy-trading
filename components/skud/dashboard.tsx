@@ -57,6 +57,21 @@ export function Dashboard({ preview = false }: DashboardProps) {
   const [formMessage, setFormMessage] = useState<string | null>(null)
 
   useEffect(() => {
+    if (preview) return
+    try {
+      const storedAccount = sessionStorage.getItem('skud-mt5-account')
+      if (!storedAccount) return
+      const account = JSON.parse(storedAccount) as Partial<LiveMt5Account>
+      if (!account.login || !account.server || !account.statusToken) return
+      setLiveAccount({ login: account.login, server: account.server, statusToken: account.statusToken })
+      setLiveStatus({ message: 'Waiting for the MT5 terminal and EA login confirmation.' })
+      setAccountConnected(true)
+    } catch {
+      sessionStorage.removeItem('skud-mt5-account')
+    }
+  }, [preview])
+
+  useEffect(() => {
     if (!liveAccount) return
     const account = liveAccount
 
@@ -90,6 +105,7 @@ export function Dashboard({ preview = false }: DashboardProps) {
   }, [liveAccount])
 
   function signOut() {
+    sessionStorage.removeItem('skud-mt5-account')
     setAccountConnected(false)
     setLiveAccount(null)
     setLiveStatus(null)
