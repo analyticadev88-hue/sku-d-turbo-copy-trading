@@ -1,4 +1,4 @@
-param([switch]$RefreshTerminals)
+param([switch]$RefreshTerminals, [switch]$InitializeKey)
 
 $ErrorActionPreference = 'Stop'
 try {
@@ -44,6 +44,37 @@ function Get-OrCreateProtectedToken([string]$Name) {
     }
 }
 
+# Initialize the key before MT5 setup so it can be entered into the Student EA.
+$bridgeKey = Get-OrCreateProtectedToken 'bridge-key'
+if ($InitializeKey) {
+    Write-Host ''
+    Write-Host 'Persistent SkuD bridge key (copy to Vercel as server-only SKUD_BRIDGE_KEY and into the Student EA EaToken input):' -ForegroundColor Yellow
+    Write-Host $bridgeKey
+    Write-Host ''
+    Write-Host "Key saved for Windows user $env:USERNAME at $secretsDirectory\bridge-key.dpapi. Keep using this same Windows account."
+    return
+}
+
+$pythonCommand = Get-Command python.exe -ErrorAction SilentlyContinue
+$pythonArguments = @()
+if (-not $pythonCommand) {
+    $pythonCommand = Get-Command py.exe -ErrorAction SilentlyContinue
+    $pythonArguments = @('-3')
+}
+if (-not $pythonCommand) {
+    throw 'Python 3.10 or newer was not found. Install Python with PATH enabled, or install the Windows py launcher.'
+}
+$pythonVersionText = & $pythonCommand.Source @pythonArguments --version 2>&1 | Out-String
+if ($pythonVersionText -notmatch 'Python\s+(\d+)\.(\d+)') {
+    throw "Could not identify the Python version from: $($pythonVersionText.Trim())"
+}
+$pythonMajor = [int]$Matches[1]
+$pythonMinor = [int]$Matches[2]
+if ($pythonMajor -lt 3 -or ($pythonMajor -eq 3 -and $pythonMinor -lt 10)) {
+    throw "Python 3.10 or newer is required; detected $($pythonVersionText.Trim())."
+}
+Write-Host "Using $($pythonVersionText.Trim()) via $($pythonCommand.Name)." -ForegroundColor Green
+
 # --- SkuD terminal infrastructure (seed once on the VPS, see README) ---
 # Defaults match the runbook: master terminal at C:\skud\mt5-master.
 # Override any of them with environment variables before running this script.
@@ -54,13 +85,13 @@ $chartTemplate   = if ($env:SKUD_CHART_TEMPLATE)   { $env:SKUD_CHART_TEMPLATE } 
 
 New-Item -ItemType Directory -Force -Path $terminalsDir | Out-Null
 if (-not (Test-Path (Join-Path $terminalMaster 'terminal64.exe'))) {
-    throw "Master terminal not found at $terminalMaster. Seed it per README section C (copy the MT5 install there and run terminal64.exe /portable once)."
+    throw "Master terminal not found at $terminalMaster. Copy MT5 there, launch it once with /portable, then rerun after compiling the Student EA and saving its SkuD chart. The persistent bridge key is already initialized."
 }
 if (-not (Test-Path $eaSource)) {
-    throw "Compiled student EA not found at $eaSource. Copy SkuDTurboStudentEA.mq5 and SkuDTurboStudentCore.mqh into the master terminal's MQL5\Experts, then compile SkuDTurboStudentEA.mq5 with F7 in MetaEditor."
+    throw "Compiled Student EA not found at $eaSource. Copy SkuDTurboStudentEA.mq5 and SkuDTurboStudentCore.mqh into the master terminal's MQL5\Experts, compile SkuDTurboStudentEA.mq5 with F7, attach it, and save the SkuD chart. The persistent bridge key is already initialized."
 }
 if (-not (Test-Path $chartTemplate)) {
-    Write-Warning "Chart template not found at $chartTemplate. Terminals launch without an auto-attached EA; attach the EA to a chart manually in each terminal (README step 8)."
+    throw "Student chart template not found at $chartTemplate. Attach SkuDTurboStudentEA to a master chart and save the profile as SkuD before starting student terminals. The persistent bridge key is already initialized."
 }
 
 $env:SKUD_TERMINALS_DIR   = $terminalsDir
@@ -70,7 +101,6 @@ $env:SKUD_CHART_TEMPLATE  = $chartTemplate
 
 # One shared key protects the bridge and EA. It is created once, DPAPI-protected
 # for this Windows user, and stored outside the app folder for reuse after updates.
-$bridgeKey = Get-OrCreateProtectedToken 'bridge-key'
 $env:SKUD_BRIDGE_KEY = $bridgeKey
 $env:SKUD_EA_TOKEN = $bridgeKey
 $env:SKUD_ALLOWED_ORIGIN = 'https://skudturbo.vercel.app'
@@ -81,24 +111,23 @@ New-Item -ItemType Directory -Force -Path (Split-Path $env:SKUD_DB_PATH) | Out-N
 
 Write-Host ''
 Write-Host 'SkuD MT5 bridge is starting.' -ForegroundColor Green
-Write-Host 'Bridge key (set as SKUD_BRIDGE_KEY in the Vercel server environment; keep it server-only. The Student EA uses this matching token.):' -ForegroundColor Yellow
-Write-Host $bridgeKey
+Write-Host "Persistent SkuD bridge key loaded for Windows user $env:USERNAME."
 Write-Host ''
 Write-Host 'Re-launching terminals for active accounts that are not running...' -ForegroundColor DarkGray
 if ($RefreshTerminals) {
     Write-Warning 'Refresh requested: all terminal64.exe processes under the managed SkuD slots directory will be closed, refreshed from the master EA/chart files, and restarted. Positions already held by the broker remain open, but monitoring is interrupted briefly.'
 }
 $refreshValue = if ($RefreshTerminals) { 'True' } else { 'False' }
-& python -c "import bridge; bridge.reconcile_on_boot(force_refresh=$refreshValue)"
+& $pythonCommand.Source @pythonArguments -c "import bridge; bridge.reconcile_on_boot(force_refresh=$refreshValue)"
 if ($LASTEXITCODE -ne 0) {
-    throw "Terminal reconciliation failed with exit code $LASTEXITCODE. Check that Python is installed and available as 'python'."
+    throw "Terminal reconciliation failed with exit code $LASTEXITCODE. Check the Python installation and bridge files."
 }
 Write-Host ''
 Write-Host 'Bridge is loopback-only at http://127.0.0.1:8765; Caddy serves it over HTTPS. Do not expose port 8765.'
 Write-Host 'Keep this window open.'
 Write-Host ''
 
-& python .\bridge.py
+& $pythonCommand.Source @pythonArguments .\bridge.py
 if ($LASTEXITCODE -ne 0) {
     throw "Bridge exited with code $LASTEXITCODE."
 }

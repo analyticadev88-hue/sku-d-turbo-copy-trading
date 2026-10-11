@@ -104,7 +104,6 @@ export function Dashboard({ preview = false }: DashboardProps) {
     const login = String(formData.get('login') ?? '').trim()
     const password = String(formData.get('password') ?? '')
     const server = String(formData.get('server') ?? '')
-    const enrollmentCode = String(formData.get('enrollmentCode') ?? '')
 
     if (preview) {
       form.reset()
@@ -119,7 +118,7 @@ export function Dashboard({ preview = false }: DashboardProps) {
       const response = await fetch('/api/mt5/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ login, password, server, enrollmentCode }),
+        body: JSON.stringify({ login, password, server }),
       })
 
       const data = (await response.json()) as {
@@ -267,19 +266,6 @@ export function Dashboard({ preview = false }: DashboardProps) {
                 {DERIV_SERVERS.map((server) => <option key={server}>{server}</option>)}
               </select>
             </div>
-            {!preview && (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="dashboard-mt5-enrollment-code" className="text-white/75">Demo enrollment code</Label>
-                <Input
-                  id="dashboard-mt5-enrollment-code"
-                  name="enrollmentCode"
-                  type="password"
-                  autoComplete="off"
-                  required
-                  className="h-11 border-white/15 bg-[#1a1a1e] text-white placeholder:text-white/35"
-                />
-              </div>
-            )}
             <button
               type="submit"
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-primary px-5 text-sm font-extrabold text-white transition-colors hover:bg-primary/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"

@@ -62,11 +62,26 @@ foreach ($name in $requiredBridgeFiles) {
 }
 
 $python = Get-Command python.exe -ErrorAction SilentlyContinue
+$pythonArguments = @()
+if (-not $python) {
+    $python = Get-Command py.exe -ErrorAction SilentlyContinue
+    $pythonArguments = @('-3')
+}
 if ($python) {
-    $pythonVersion = & $python.Source --version 2>&1 | Out-String
-    Add-Check 'PASS' 'Python' ($pythonVersion.Trim())
+    $pythonVersion = & $python.Source @pythonArguments --version 2>&1 | Out-String
+    if ($pythonVersion -match 'Python\s+(\d+)\.(\d+)') {
+        $pythonMajor = [int]$Matches[1]
+        $pythonMinor = [int]$Matches[2]
+        if ($pythonMajor -gt 3 -or ($pythonMajor -eq 3 -and $pythonMinor -ge 10)) {
+            Add-Check 'PASS' 'Python' "$($pythonVersion.Trim()) via $($python.Name)"
+        } else {
+            Add-Check 'FAIL' 'Python' "$($pythonVersion.Trim()) is too old. Python 3.10 or newer is required."
+        }
+    } else {
+        Add-Check 'FAIL' 'Python' "Could not identify version: $($pythonVersion.Trim())"
+    }
 } else {
-    Add-Check 'FAIL' 'Python' 'python.exe was not found on PATH.'
+    Add-Check 'FAIL' 'Python' 'Neither python.exe nor the Windows py.exe launcher was found. Python 3.10 or newer is required.'
 }
 
 $caddyCandidates = @(

@@ -47,25 +47,34 @@ Log in to a Deriv demo account to cache the server, then log out. Keep this
 master terminal separate from student terminals. Do not place it under the
 student slots directory.
 
-## 2. Compile the Student EA and create the persistent key
+## 2. Initialize the key, then prepare the Student EA template
 
-1. Copy `SkuDTurboStudentEA.mq5` and `SkuDTurboStudentCore.mqh` to
-   `C:\skud\mt5-master\MQL5\Experts`. Compile `SkuDTurboStudentEA.mq5` in
-   MetaEditor with **F7**. Confirm
+1. From `C:\skud\final`, initialize the persistent key without starting the
+   bridge or requiring a compiled EA:
+
+   ```powershell
+   .\start-bridge.ps1 -InitializeKey
+   ```
+
+   Copy the printed key into Vercel as the server-only `SKUD_BRIDGE_KEY`. Never
+   put it in a `NEXT_PUBLIC_` variable or source control. The key is saved under
+   `C:\ProgramData\SkuD` for the current Windows account; keep using that same
+   account to run the bridge. This is a one-time setup; normal bridge starts
+   reuse the same saved key. Do not put `EaToken` in `.env.example`.
+2. Copy `SkuDTurboStudentEA.mq5` and `SkuDTurboStudentCore.mqh` to
+   `C:\skud\mt5-master\MQL5\Experts`. Open `SkuDTurboStudentEA.mq5` in
+   MetaEditor, enter the bridge key in its `EaToken` input, and compile with
+   **F7**. Confirm
    `C:\skud\mt5-master\MQL5\Experts\SkuDTurboStudentEA.ex5` exists.
-2. With the compiled EA in place, start `C:\skud\final\start-bridge.ps1` once.
-   It generates or reads the persistent key and prints it. Copy that value into
-   Vercel as the server-only `SKUD_BRIDGE_KEY`. Never put it in a `NEXT_PUBLIC_`
-   variable or source control. Stop this first bridge run with Ctrl+C after
-   recording the key.
 3. Attach `SkuDTurboStudentEA` to a chart in the master template terminal. Set
-   `BridgeUrl` to `http://127.0.0.1:8765` and `EaToken` to the bridge key. Enable
-   Algo Trading, and allow WebRequest to `http://127.0.0.1:8765`.
+   `BridgeUrl` to `http://127.0.0.1:8765`, enable Algo Trading, and allow
+   WebRequest to `http://127.0.0.1:8765`.
 4. Save the chart profile as `SkuD`, then close the master terminal. Confirm
    `C:\skud\mt5-master\MQL5\Profiles\Charts\SkuD\chart01.chr` exists.
-5. Start the bridge again after setting `SKUD_BRIDGE_KEY` in Vercel. When it
-   copies this chart into a student slot, it synchronizes the saved `EaToken` to
-   the persistent key automatically.
+5. Start the full bridge with `C:\skud\final\start-bridge.ps1` or start both
+   Caddy and bridge with `C:\skud\final\start-all.ps1`. Normal startup now
+   requires the compiled Student EA and saved chart to prevent starting empty
+   student terminals.
 
 The Python bridge copies the compiled Student EA and chart file into each newly
 provisioned student terminal. Each slot receives its own `startup.ini` with that student's login,
@@ -95,21 +104,21 @@ that is expected. The health endpoint should return `status: ok`.
 ## 4. Vercel server environment
 
 Set these **server-only** variables on the `skudturbo.vercel.app` Vercel project,
-then redeploy. Use separate random values for the bridge key, demo enrollment
-code, and mentor setup code.
+then redeploy. Keep the bridge key and mentor setup code private.
 
 ```text
 SKUD_BRIDGE_URL=https://skud.toporapula.dev
 SKUD_BRIDGE_KEY=<same key used by bridge and EA>
 SKUD_DEFAULT_MENTOR_ID=mentor-skud-01
-SKUD_STUDENT_ENROLLMENT_CODE=<separate long random demo invite code>
 SKUD_ALLOW_DEMO_STUDENT_ENROLLMENT=true
 SKUD_ALLOW_LIVE_STUDENT_ACCOUNTS=false
 SKUD_MENTOR_SETUP_CODE=<separate long random operator code>
 ```
 
 Never enable live student accounts for this pilot. The bridge key is server-only;
-students only receive the separate enrollment code.
+student account submissions are controlled by the enrollment and live-account
+flags above. Add user authentication and per-account approval before opening
+enrollment to the public.
 
 ## 5. Start the SkuD services
 
@@ -148,8 +157,8 @@ response returns a one-time `mentorToken`; enter that value in
 allow WebRequest to `https://skud.toporapula.dev` in MT5.
 
 Enable demo enrollment only after mentor registration and the student EA/chart
-template are ready. Submit a Deriv demo login, trading password, server, and
-student enrollment code from the website. The dashboard should show the actual
+template are ready. Submit a Deriv demo login, trading password, and server from
+the website. The dashboard should show the actual
 login/server and wait for a matching EA heartbeat before reporting connected.
 Verify the test account and copied trades in MT5 before inviting anyone else.
 
