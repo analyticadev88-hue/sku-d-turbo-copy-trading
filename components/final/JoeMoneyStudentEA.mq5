@@ -1,0 +1,1 @@
+#include "JoeMoneyBridgeEA.mq5"
