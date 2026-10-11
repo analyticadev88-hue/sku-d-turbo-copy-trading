@@ -49,7 +49,7 @@ function Get-OrCreateProtectedToken([string]$Name) {
 # Override any of them with environment variables before running this script.
 $terminalsDir    = if ($env:SKUD_TERMINALS_DIR)    { $env:SKUD_TERMINALS_DIR }    else { 'C:\skud\terminals' }
 $terminalMaster  = if ($env:SKUD_TERMINAL_MASTER)  { $env:SKUD_TERMINAL_MASTER }  else { 'C:\skud\mt5-master' }
-$eaSource        = if ($env:SKUD_EA_SOURCE)        { $env:SKUD_EA_SOURCE }        else { 'C:\skud\mt5-master\MQL5\Experts\SkuDTurboBridgeEA.ex5' }
+$eaSource        = if ($env:SKUD_EA_SOURCE)        { $env:SKUD_EA_SOURCE }        else { 'C:\skud\mt5-master\MQL5\Experts\SkuDTurboStudentEA.ex5' }
 $chartTemplate   = if ($env:SKUD_CHART_TEMPLATE)   { $env:SKUD_CHART_TEMPLATE }   else { 'C:\skud\mt5-master\MQL5\Profiles\Charts\SkuD\chart01.chr' }
 
 New-Item -ItemType Directory -Force -Path $terminalsDir | Out-Null
@@ -57,7 +57,7 @@ if (-not (Test-Path (Join-Path $terminalMaster 'terminal64.exe'))) {
     throw "Master terminal not found at $terminalMaster. Seed it per README section C (copy the MT5 install there and run terminal64.exe /portable once)."
 }
 if (-not (Test-Path $eaSource)) {
-    throw "Compiled EA not found at $eaSource. Copy SkuDTurboBridgeEA.mq5 into the master terminal's MQL5\Experts and compile with F7 in MetaEditor."
+    throw "Compiled student EA not found at $eaSource. Copy SkuDTurboStudentEA.mq5 and SkuDTurboStudentCore.mqh into the master terminal's MQL5\Experts, then compile SkuDTurboStudentEA.mq5 with F7 in MetaEditor."
 }
 if (-not (Test-Path $chartTemplate)) {
     Write-Warning "Chart template not found at $chartTemplate. Terminals launch without an auto-attached EA; attach the EA to a chart manually in each terminal (README step 8)."
@@ -81,7 +81,7 @@ New-Item -ItemType Directory -Force -Path (Split-Path $env:SKUD_DB_PATH) | Out-N
 
 Write-Host ''
 Write-Host 'SkuD MT5 bridge is starting.' -ForegroundColor Green
-Write-Host 'Bridge key (set as SKUD_BRIDGE_KEY in the Vercel server environment; keep it server-only. The SkuD bridge EA must use the matching token.):' -ForegroundColor Yellow
+Write-Host 'Bridge key (set as SKUD_BRIDGE_KEY in the Vercel server environment; keep it server-only. The Student EA uses this matching token.):' -ForegroundColor Yellow
 Write-Host $bridgeKey
 Write-Host ''
 Write-Host 'Re-launching terminals for active accounts that are not running...' -ForegroundColor DarkGray

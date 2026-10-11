@@ -1,10 +1,18 @@
 # SkuD Turbo MT5 Bridge
 
-This folder contains the Windows VPS bridge for SkuD Turbo. It accepts demo MT5
-credentials from the website server API, starts one portable MT5 terminal per
-student account, and has the SkuD student EA execute mentor trade events. MT5
-passwords are currently stored unencrypted in the bridge SQLite database and
-terminal startup files. Use demo accounts on a controlled VPS only.
+This deployment has three distinct parts:
+
+- **Mentor EA:** runs on the mentor's laptop and publishes that account's trade
+   events to the HTTPS bridge.
+- **Python bridge:** runs on the VPS, receives events, manages portable student
+   terminals, and queues events for each student account.
+- **Student EA:** runs inside every VPS student terminal and executes queued
+   events on that logged-in student account.
+
+There is no separate "Bridge EA." The EA deployed to each VPS student profile is
+`SkuDTurboStudentEA`. MT5 passwords are currently stored unencrypted in the
+bridge SQLite database and terminal startup files. Use demo accounts on a
+controlled VPS only.
 
 ## VPS layout
 
@@ -39,26 +47,28 @@ Log in to a Deriv demo account to cache the server, then log out. Keep this
 master terminal separate from student terminals. Do not place it under the
 student slots directory.
 
-## 2. Compile and save the SkuD EA template
+## 2. Compile the Student EA and create the persistent key
 
-1. Copy `SkuDTurboBridgeEA.mq5` to
-   `C:\skud\mt5-master\MQL5\Experts\SkuDTurboBridgeEA.mq5`. Compile it in
-   MetaEditor with **F7**, leaving the EA input `EaToken` blank in the master
-   template. Confirm
-   `C:\skud\mt5-master\MQL5\Experts\SkuDTurboBridgeEA.ex5` exists.
-2. Attach `SkuDTurboBridgeEA` to a chart in the master terminal. Set
-   `BridgeUrl` to `http://127.0.0.1:8765`, enable Algo Trading, and allow
-   WebRequest to `http://127.0.0.1:8765`.
-3. Save the chart profile as `SkuD`, then close the master terminal. Confirm
+1. Copy `SkuDTurboStudentEA.mq5` and `SkuDTurboStudentCore.mqh` to
+   `C:\skud\mt5-master\MQL5\Experts`. Compile `SkuDTurboStudentEA.mq5` in
+   MetaEditor with **F7**. Confirm
+   `C:\skud\mt5-master\MQL5\Experts\SkuDTurboStudentEA.ex5` exists.
+2. With the compiled EA in place, start `C:\skud\final\start-bridge.ps1` once.
+   It generates or reads the persistent key and prints it. Copy that value into
+   Vercel as the server-only `SKUD_BRIDGE_KEY`. Never put it in a `NEXT_PUBLIC_`
+   variable or source control. Stop this first bridge run with Ctrl+C after
+   recording the key.
+3. Attach `SkuDTurboStudentEA` to a chart in the master template terminal. Set
+   `BridgeUrl` to `http://127.0.0.1:8765` and `EaToken` to the bridge key. Enable
+   Algo Trading, and allow WebRequest to `http://127.0.0.1:8765`.
+4. Save the chart profile as `SkuD`, then close the master terminal. Confirm
    `C:\skud\mt5-master\MQL5\Profiles\Charts\SkuD\chart01.chr` exists.
-4. Start `C:\skud\final\start-bridge.ps1`. It generates or reads the persistent
-   bridge key and prints it once. Set that value as `SKUD_BRIDGE_KEY` in the
-   Vercel server environment. Never put this key in a `NEXT_PUBLIC_` variable or
-   source control. On provisioning, the launcher injects it into each copied
-   student chart profile. Restart the bridge after setting its server-side key.
+5. Start the bridge again after setting `SKUD_BRIDGE_KEY` in Vercel. When it
+   copies this chart into a student slot, it synchronizes the saved `EaToken` to
+   the persistent key automatically.
 
-The bridge copies this EA and chart file into each newly provisioned student
-terminal. Each slot receives its own `startup.ini` with that student's login,
+The Python bridge copies the compiled Student EA and chart file into each newly
+provisioned student terminal. Each slot receives its own `startup.ini` with that student's login,
 password, and broker server. Do not add student credentials to the master
 profile.
 
@@ -134,7 +144,7 @@ Set-Location C:\skud\final
 After the bridge health check succeeds, register the mentor through the
 protected `POST /api/admin/mentors` route using `SKUD_MENTOR_SETUP_CODE`. The
 response returns a one-time `mentorToken`; enter that value in
-`SkuDTurboMentorEA.mq5` on the mentor's demo account. Compile the mentor EA and
+`SkuDTurboMentorEA.mq5` on the mentor's demo account. Compile the Mentor EA and
 allow WebRequest to `https://skud.toporapula.dev` in MT5.
 
 Enable demo enrollment only after mentor registration and the student EA/chart

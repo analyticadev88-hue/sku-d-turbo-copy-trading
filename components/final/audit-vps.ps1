@@ -1,7 +1,8 @@
 param(
     [string]$FinalDirectory = $PSScriptRoot,
     [string]$MasterDirectory = $(if ($env:SKUD_TERMINAL_MASTER) { $env:SKUD_TERMINAL_MASTER } else { 'C:\skud\mt5-master' }),
-    [string]$TerminalsDirectory = $(if ($env:SKUD_TERMINALS_DIR) { $env:SKUD_TERMINALS_DIR } else { 'C:\skud\terminals' })
+    [string]$TerminalsDirectory = $(if ($env:SKUD_TERMINALS_DIR) { $env:SKUD_TERMINALS_DIR } else { 'C:\skud\terminals' }),
+    [switch]$NoPause
 )
 
 $ErrorActionPreference = 'Continue'
@@ -51,7 +52,7 @@ $requiredBridgeFiles = @(
     'start-bridge.ps1',
     'start-caddy.ps1',
     'Caddyfile',
-    'SkuDTurboBridgeEA.mq5',
+    'SkuDTurboStudentCore.mqh',
     'SkuDTurboMentorEA.mq5',
     'SkuDTurboStudentEA.mq5',
     'test_bridge.py'
@@ -97,10 +98,10 @@ if (Test-Path -LiteralPath $caddyFile -PathType Leaf) {
 }
 
 $masterExe = Join-Path $MasterDirectory 'terminal64.exe'
-$masterEa = Join-Path $MasterDirectory 'MQL5\Experts\SkuDTurboBridgeEA.ex5'
+$masterEa = Join-Path $MasterDirectory 'MQL5\Experts\SkuDTurboStudentEA.ex5'
 $masterChart = Join-Path $MasterDirectory 'MQL5\Profiles\Charts\SkuD\chart01.chr'
 Test-RequiredFile $masterExe 'MT5 master terminal'
-Test-RequiredFile $masterEa 'Compiled bridge EA'
+Test-RequiredFile $masterEa 'Compiled student EA'
 Test-RequiredFile $masterChart 'Saved master chart template'
 
 if (Test-Path -LiteralPath $TerminalsDirectory -PathType Container) {
@@ -163,6 +164,10 @@ $warnCount = @($checks | Where-Object Status -eq 'WARN').Count
 $passCount = @($checks | Where-Object Status -eq 'PASS').Count
 Write-Host "Summary: $passCount pass, $warnCount warning(s), $failCount missing/failed check(s)." -ForegroundColor Cyan
 Write-Host ''
-Write-Host 'Portable MT5 readiness requires all three master items: terminal64.exe, compiled SkuDTurboBridgeEA.ex5, and the saved SkuD chart01.chr.'
-Write-Host 'After the master is configured, its EA and chart template are copied into each account slot. Do not start student enrollment until the demo mentor and bridge are registered.'
+Write-Host 'Portable MT5 readiness requires all three master items: terminal64.exe, compiled SkuDTurboStudentEA.ex5, and the saved SkuD chart01.chr.'
+Write-Host 'The SkuD Student EA and chart template are copied into each student account slot. The Mentor EA runs separately on the mentor laptop; the Python bridge relays events.'
 Write-Host 'This script does not inspect or print credentials, bridge keys, EA tokens, or startup.ini contents.'
+
+if (-not $NoPause) {
+    Read-Host 'Audit complete. Press Enter to close this window' | Out-Null
+}

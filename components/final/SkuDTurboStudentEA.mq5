@@ -1,1 +1,1 @@
-#include "SkuDTurboBridgeEA.mq5"
+#include "SkuDTurboStudentCore.mqh"

@@ -229,7 +229,7 @@ def ensure_terminal(account: dict) -> tuple[bool, str]:
             shutil.copy2(CHART_TEMPLATE, target_chart)
             sync_chart_token(target_chart)
         else:
-            warnings.append("chart template not configured; attach the SkuD bridge EA to a chart manually")
+            warnings.append("chart template not configured; attach the SkuD Student EA to a chart manually")
         subprocess.Popen([str(exe), "/portable", f"/config:{folder / 'startup.ini'}"], cwd=str(folder), close_fds=True)
         return True, "; ".join(warnings) if warnings else "launched"
     except Exception as exc:
