@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { DotLottieReact } from '@lottiefiles/dotlottie-react'
 import {
   ArrowRight,
@@ -37,18 +37,62 @@ const DEFAULT_MENTOR_ID = 'SkudTurbo'
 
 type DashboardProps = { preview?: boolean }
 type Tab = 'home' | 'profile'
+type LiveMt5Account = { login: string; server: string; statusToken: string }
+type Mt5Status = {
+  terminal_connected?: boolean
+  balance?: number
+  currency?: string
+  message?: string
+}
 
 export function Dashboard({ preview = false }: DashboardProps) {
   const [tab, setTab] = useState<Tab>('home')
   const [accountConnected, setAccountConnected] = useState(preview)
   const [mentorId, setMentorId] = useState(preview ? DEFAULT_MENTOR_ID : 'Pending setup')
+  const [liveAccount, setLiveAccount] = useState<LiveMt5Account | null>(null)
+  const [liveStatus, setLiveStatus] = useState<Mt5Status | null>(null)
   const [accountDialogOpen, setAccountDialogOpen] = useState(false)
   const [accountSheetOpen, setAccountSheetOpen] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [formMessage, setFormMessage] = useState<string | null>(null)
 
+  useEffect(() => {
+    if (!liveAccount) return
+    const account = liveAccount
+
+    let active = true
+    let interval: ReturnType<typeof setInterval> | undefined
+
+    async function refreshStatus() {
+      try {
+        const response = await fetch(`/api/mt5/status?login=${encodeURIComponent(account.login)}`, {
+          headers: { Authorization: `Bearer ${account.statusToken}` },
+          cache: 'no-store',
+        })
+        const result = await response.json() as Mt5Status & { error?: string }
+        if (!response.ok) {
+          if (active) setLiveStatus({ message: result.error ?? 'Could not read MT5 status.' })
+          if (response.status === 401 && interval) clearInterval(interval)
+          return
+        }
+        if (active) setLiveStatus(result)
+      } catch {
+        if (active) setLiveStatus({ message: 'Could not reach the MT5 status service.' })
+      }
+    }
+
+    void refreshStatus()
+    interval = setInterval(() => void refreshStatus(), 5_000)
+    return () => {
+      active = false
+      if (interval) clearInterval(interval)
+    }
+  }, [liveAccount])
+
   function signOut() {
     setAccountConnected(false)
+    setLiveAccount(null)
+    setLiveStatus(null)
     setTab('home')
   }
 
@@ -60,6 +104,7 @@ export function Dashboard({ preview = false }: DashboardProps) {
     const login = String(formData.get('login') ?? '').trim()
     const password = String(formData.get('password') ?? '')
     const server = String(formData.get('server') ?? '')
+    const enrollmentCode = String(formData.get('enrollmentCode') ?? '')
 
     if (preview) {
       form.reset()
@@ -74,14 +119,24 @@ export function Dashboard({ preview = false }: DashboardProps) {
       const response = await fetch('/api/mt5/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ login, password, server }),
+        body: JSON.stringify({ login, password, server, enrollmentCode }),
       })
 
-      const data = (await response.json()) as { error?: string; login?: string; server?: string }
+      const data = (await response.json()) as {
+        error?: string
+        login?: string
+        server?: string
+        statusToken?: string
+      }
       if (!response.ok) {
         throw new Error(data.error ?? 'Could not connect your MT5 account.')
       }
+      if (!data.login || !data.server || !data.statusToken) {
+        throw new Error('The MT5 service returned incomplete account details.')
+      }
 
+      setLiveAccount({ login: data.login, server: data.server, statusToken: data.statusToken })
+      setLiveStatus({ message: 'Waiting for the MT5 terminal and EA login confirmation.' })
       setAccountConnected(true)
       setMentorId(DEFAULT_MENTOR_ID)
       form.reset()
@@ -115,6 +170,8 @@ export function Dashboard({ preview = false }: DashboardProps) {
         <HomeView
           preview={preview}
           accountConnected={accountConnected}
+          liveAccount={liveAccount}
+          liveStatus={liveStatus}
           mentorId={mentorId}
           onConnect={openAccountDialog}
           onSignOut={signOut}
@@ -210,6 +267,19 @@ export function Dashboard({ preview = false }: DashboardProps) {
                 {DERIV_SERVERS.map((server) => <option key={server}>{server}</option>)}
               </select>
             </div>
+            {!preview && (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="dashboard-mt5-enrollment-code" className="text-white/75">Demo enrollment code</Label>
+                <Input
+                  id="dashboard-mt5-enrollment-code"
+                  name="enrollmentCode"
+                  type="password"
+                  autoComplete="off"
+                  required
+                  className="h-11 border-white/15 bg-[#1a1a1e] text-white placeholder:text-white/35"
+                />
+              </div>
+            )}
             <button
               type="submit"
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-primary px-5 text-sm font-extrabold text-white transition-colors hover:bg-primary/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
@@ -231,22 +301,22 @@ export function Dashboard({ preview = false }: DashboardProps) {
           <DialogHeader>
             <DialogTitle className="text-xl font-extrabold text-white">Account details</DialogTitle>
             <DialogDescription className="text-white/55">
-              This is sample preview data, not a live Deriv connection.
+              {preview ? 'This is sample preview data, not a live Deriv connection.' : 'Account status is confirmed by the MT5 EA heartbeat.'}
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-md border border-white/10 bg-[#1a1a1e] p-4 sm:p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-white/45">Preview account</p>
+                <p className="text-[9px] font-extrabold uppercase tracking-[0.16em] text-white/45">{preview ? 'Preview account' : 'MT5 account'}</p>
                 <p className="mt-1 text-sm font-extrabold">Deriv MT5</p>
               </div>
-              <span className="rounded-sm border border-primary/30 bg-primary/10 px-2 py-1 text-[9px] font-extrabold uppercase tracking-[0.1em] text-primary">Sample</span>
+              <span className="rounded-sm border border-primary/30 bg-primary/10 px-2 py-1 text-[9px] font-extrabold uppercase tracking-[0.1em] text-primary">{preview ? 'Sample' : liveStatus?.terminal_connected ? 'Connected' : 'Pending'}</span>
             </div>
-            <p className="mt-5 font-mono text-3xl font-extrabold tabular-nums">$10,000.00 <span className="text-xs font-bold text-white/45">USD</span></p>
+            <p className="mt-5 font-mono text-3xl font-extrabold tabular-nums">{preview ? '$10,000.00' : liveStatus?.terminal_connected && typeof liveStatus.balance === 'number' ? liveStatus.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'Waiting for MT5'} <span className="text-xs font-bold text-white/45">{preview ? 'USD' : liveStatus?.currency ?? ''}</span></p>
             <dl className="mt-4 divide-y divide-white/10 border-y border-white/10 text-xs">
-              <div className="flex justify-between gap-4 py-3"><dt className="text-white/50">Login</dt><dd className="font-mono font-semibold">345643</dd></div>
-              <div className="flex justify-between gap-4 py-3"><dt className="text-white/50">Server</dt><dd className="font-semibold">Deriv-Demo</dd></div>
-              <div className="flex justify-between gap-4 py-3"><dt className="text-white/50">Connection</dt><dd className="font-semibold text-primary">Preview only</dd></div>
+              <div className="flex justify-between gap-4 py-3"><dt className="text-white/50">Login</dt><dd className="font-mono font-semibold">{preview ? '345643' : liveAccount?.login ?? 'Not connected'}</dd></div>
+              <div className="flex justify-between gap-4 py-3"><dt className="text-white/50">Server</dt><dd className="font-semibold">{preview ? 'Deriv-Demo' : liveAccount?.server ?? '—'}</dd></div>
+              <div className="flex justify-between gap-4 py-3"><dt className="text-white/50">Connection</dt><dd className="max-w-[65%] text-right font-semibold text-primary">{preview ? 'Preview only' : liveStatus?.terminal_connected ? 'EA confirmed' : liveStatus?.message ?? 'Waiting for EA confirmation'}</dd></div>
             </dl>
           </div>
           <button
@@ -282,6 +352,8 @@ export function Dashboard({ preview = false }: DashboardProps) {
 function HomeView({
   preview,
   accountConnected,
+  liveAccount,
+  liveStatus,
   mentorId,
   onConnect,
   onSignOut,
@@ -289,6 +361,8 @@ function HomeView({
 }: {
   preview: boolean
   accountConnected: boolean
+  liveAccount: LiveMt5Account | null
+  liveStatus: Mt5Status | null
   mentorId: string
   onConnect: () => void
   onSignOut: () => void
@@ -321,7 +395,7 @@ function HomeView({
       <section aria-label="MT5 account" className="relative z-10 -mt-5 flex flex-1 flex-col gap-4 rounded-t-[28px] bg-[#0b0b0d] px-4 pb-5 pt-5 text-white sm:rounded-t-[34px] sm:px-8 sm:gap-5">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-white/45">{accountConnected ? 'Account connected' : 'Account access'}</p>
+            <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-white/45">{preview ? 'Preview account' : liveStatus?.terminal_connected ? 'MT5 connected' : accountConnected ? 'Waiting for MT5' : 'Account access'}</p>
             <p className="mt-1 text-sm font-bold text-white">{accountConnected ? 'Your Deriv MT5' : 'Sign in to Deriv MT5'}</p>
           </div>
         </div>
@@ -330,7 +404,14 @@ function HomeView({
             <div className="mb-4 flex items-end justify-between gap-3 border-b border-white/10 pb-4">
               <div>
                 <p className="text-[8px] font-extrabold uppercase tracking-[0.15em] text-white/40">Account balance</p>
-                <p className="mt-1 font-mono text-2xl font-extrabold tabular-nums text-white">$10,000<span className="ml-1 text-[10px] font-bold text-white/45">USD</span></p>
+                <p className="mt-1 font-mono text-2xl font-extrabold tabular-nums text-white">
+                  {preview
+                    ? '$10,000'
+                    : liveStatus?.terminal_connected && typeof liveStatus.balance === 'number'
+                      ? liveStatus.balance.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                      : 'Pending'}
+                  <span className="ml-1 text-[10px] font-bold text-white/45">{preview ? 'USD' : liveStatus?.currency ?? ''}</span>
+                </p>
               </div>
               {preview && <span className="pb-1 text-[8px] font-bold uppercase tracking-[0.1em] text-white/35">Sample</span>}
             </div>
@@ -338,12 +419,12 @@ function HomeView({
           <div className="flex min-h-[58px] items-center justify-between gap-3">
             <button type="button" onClick={accountConnected ? onAccountDetails : onConnect} className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
               <DerivMark className="size-8 shrink-0 rounded-none bg-transparent text-2xl text-primary" />
-              <span className="min-w-0"><span className="block text-[8px] font-extrabold uppercase tracking-[0.14em] text-white/45">Login ID</span><span className="mt-1 block truncate font-mono text-sm font-extrabold tabular-nums text-white">{accountConnected ? '345643' : 'Not connected'}</span></span>
+              <span className="min-w-0"><span className="block text-[8px] font-extrabold uppercase tracking-[0.14em] text-white/45">Login ID</span><span className="mt-1 block truncate font-mono text-sm font-extrabold tabular-nums text-white">{preview ? '345643' : liveAccount?.login ?? 'Not connected'}</span></span>
             </button>
             {accountConnected ? <button type="button" onClick={onSignOut} className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-sm border border-white/15 px-3 text-[9px] font-extrabold uppercase tracking-[0.08em] text-white/75 transition-colors hover:border-primary/50 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"><LogOut className="size-3.5" aria-hidden="true" />Disconnect</button> : <button type="button" onClick={onConnect} className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-sm bg-primary px-3 text-[9px] font-extrabold uppercase tracking-[0.08em] text-white transition-colors hover:bg-primary/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">Sign in <ArrowRight className="size-3.5" aria-hidden="true" /></button>}
           </div>
         </div>
-        {accountConnected && <p className="mt-3 px-1 text-[9px] leading-relaxed text-white/40">{preview ? 'Preview account details only. Not connected to a broker.' : 'Deriv MT5 account'}</p>}
+        {accountConnected && <p className="mt-3 px-1 text-[9px] leading-relaxed text-white/40">{preview ? 'Preview account details only. Not connected to a broker.' : liveStatus?.terminal_connected ? liveStatus.message ?? 'EA confirmed the MT5 login.' : liveStatus?.message ?? 'Waiting for the MT5 EA to confirm the broker login.'}</p>}
       </section>
     </div>
   )

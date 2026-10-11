@@ -1,7 +1,7 @@
 # JoeMoney Multi-Account MT5 Bridge
 
-This package runs the MT5 execution side of the JoeMoney PWA on a Windows VPS
-(178.238.234.68). Clients enter their MT5 account details (login/password/server) in
+This package runs the MT5 execution side of the SkuD Turbo app on a Windows VPS
+(46.224.112.35). Clients enter their MT5 account details (login/password/server) in
 the PWA; the bridge stores them in a local SQLite database, starts one portable MT5
 terminal per account (auto-login via `startup.ini`, EA pre-attached via a chart
 profile), and routes order batches to the right terminal. The JoeMoney EA inside
@@ -22,7 +22,7 @@ the VPS, so clients never authenticate by hand.
 ## VPS Setup and Run (Windows Server)
 
 These steps use the current deployment paths and domain: `C:\JoeMoney\final`,
-`C:\MT5Terminals\JoeMoneyMaster`, and `bridge.toporapula.dev`. The master is a
+`C:\MT5Terminals\JoeMoneyMaster`, and `skud.toporapula.dev`. The master is a
 one-time template-building terminal. The bridge starts the per-account portable
 terminals.
 
@@ -72,9 +72,9 @@ template before running the refresh.
 2. Read the current bridge key from the already-running bridge PowerShell window.
    If the bridge is not running, open `C:\JoeMoney\final` and run
    `.start-all.ps1` once; keep its Caddy and bridge windows open. Use the key
-   printed by the bridge. This is one shared key: enter it as the EA's `EaToken`
-   and set it as `VITE_JOEMONEY_BRIDGE_KEY` in Vercel. There is no separate EA
-   token to create.
+   printed by the bridge. Keep it server-side as `JOEMONEY_BRIDGE_KEY` in the
+   Vercel project environment; the bridge EA must use the matching `EaToken`.
+   Do not use a `NEXT_PUBLIC_` or `VITE_` variable for this key.
 3. In the master MT5, open a chart and attach `JoeMoneyBridgeEA`. Set
    `BridgeUrl` to `http://127.0.0.1:8765` and `EaToken` to the current bridge key.
    Enable **Algo Trading**. In MT5 Options > Expert Advisors, allow WebRequest to
@@ -101,8 +101,11 @@ template before running the refresh.
 
 ### 3. DNS, Caddy, and firewall
 
-1. The DNS A record for `bridge.toporapula.dev` must point to `178.238.234.68`.
-   Caddy needs a domain name to obtain a public TLS certificate.
+1. Create an A record for `skud.toporapula.dev` pointing to `46.224.112.35`.
+   Keep the existing `bridge.toporapula.dev` record unchanged for JoeMoney.
+   The DNS zone must allow Caddy's certificate authority: add a CAA record
+   `0 issue "letsencrypt.org"` alongside existing CAA records, otherwise Caddy
+   will be blocked from issuing its HTTPS certificate.
 2. Caddy needs no installer. Put the downloaded Windows executable, named exactly
    `caddy.exe`, at `C:\JoeMoney\final\caddy.exe` or `C:\Caddy\caddy.exe`.
    `start-caddy.ps1` also checks `PATH`.
@@ -114,7 +117,7 @@ template before running the refresh.
    New-NetFirewallRule -DisplayName "Caddy HTTPS" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow
    ```
 
-   Allow these ports in the Contabo firewall/security settings too, if enabled.
+   Allow these ports in the VPS provider firewall/security settings too, if enabled.
    Leave port `8765` private. Caddy serves HTTPS and renews its certificate.
    This deployment obtained its certificate successfully after public access to
    ports 80/443 was allowed; earlier timeout messages in the log were from before
@@ -122,23 +125,34 @@ template before running the refresh.
 
 ### 4. Set Vercel environment variables
 
-Set these in Vercel Production and redeploy after changing them:
+Set these server-only variables in the `skudturbo.vercel.app` Vercel project and
+redeploy after changing them. Never expose bridge keys as public/client variables:
 
 ```text
-VITE_JOEMONEY_API_URL=https://bridge.toporapula.dev
-VITE_JOEMONEY_BRIDGE_KEY=<current key printed by start-bridge.ps1>
+JOEMONEY_BRIDGE_URL=https://skud.toporapula.dev
+JOEMONEY_BRIDGE_KEY=<current key printed by start-bridge.ps1>
+JOEMONEY_DEFAULT_MENTOR_ID=mentor-skud-01
+JOEMONEY_STUDENT_ENROLLMENT_CODE=<separate long random demo invite code>
+JOEMONEY_ALLOW_DEMO_STUDENT_ENROLLMENT=true
+JOEMONEY_ALLOW_LIVE_STUDENT_ACCOUNTS=false
+JOEMONEY_MENTOR_SETUP_CODE=<separate long random operator code>
 ```
+
+Use the same bridge key for the website server and bridge, while keeping the
+student enrollment code and mentor setup code separate from that key. Keep live
+account enrollment disabled for this demo.
 
 The bridge saves its DPAPI-protected key at
 `C:\ProgramData\JoeMoney\bridge-key.dpapi`, outside the app folder, and reuses it
 on later starts and app updates. Run the bridge under the same Windows account
-that created the key. The EA `EaToken` and PWA bridge key are this same value; do
+that created the key. The EA `EaToken` and website server's `JOEMONEY_BRIDGE_KEY`
+must match; do
 not rotate either unless the saved key has intentionally been replaced. If an old
 key file is migrated from `C:\JoeMoney\final\secrets`, the bridge reports that
 migration. If the stable key cannot be decrypted, startup stops with an error
 instead of silently issuing a different key.
 
-Opening `https://bridge.toporapula.dev/v1/accounts` in a browser without an API
+Opening `https://skud.toporapula.dev/v1/accounts` in a browser without an API
 key returns `{"error":"Unauthorized"}`. That is expected and confirms HTTPS
 reached the authenticated bridge.
 

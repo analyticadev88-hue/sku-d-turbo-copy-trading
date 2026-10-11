@@ -1,7 +1,7 @@
-# Caddy serves the JoeMoney bridge over public HTTPS.
-# DNS: A record bridge.toporapula.dev -> 178.238.234.68 (managed in Vercel).
+# Caddy serves the SkuD bridge over public HTTPS.
+# DNS: A record skud.toporapula.dev -> 46.224.112.35.
 # Firewall: allow 443 (and RDP from your admin IP only). Port 8765 must stay loopback.
-# Caddy obtains and renews the Let's Encrypt certificate automatically.
-bridge.toporapula.dev {
+# CAA must allow letsencrypt.org for Caddy's automatic certificate.
+skud.toporapula.dev {
     reverse_proxy 127.0.0.1:8765
 }

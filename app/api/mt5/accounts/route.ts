@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 
 const DERIV_SERVERS = [
   'Deriv-Demo',
@@ -14,6 +14,13 @@ const DERIV_SERVERS = [
 
 function jsonError(error: string, status: number) {
   return Response.json({ error }, { status, headers: { 'Cache-Control': 'no-store' } })
+}
+
+function constantTimeMatch(value: string, expected: string) {
+  const actualBytes = Buffer.from(value)
+  const expectedBytes = Buffer.from(expected)
+  return expectedBytes.length > 0 && actualBytes.length === expectedBytes.length &&
+    timingSafeEqual(actualBytes, expectedBytes)
 }
 
 export async function POST(request: Request) {
@@ -32,7 +39,12 @@ export async function POST(request: Request) {
     return jsonError('MT5 bridge configuration is incomplete.', 503)
   }
 
-  let payload: { login?: unknown; password?: unknown; server?: unknown }
+  const enrollmentCode = process.env.JOEMONEY_STUDENT_ENROLLMENT_CODE ?? ''
+  if (!enrollmentCode) {
+    return jsonError('Demo enrollment code is not configured.', 503)
+  }
+
+  let payload: { login?: unknown; password?: unknown; server?: unknown; enrollmentCode?: unknown }
   try {
     payload = await request.json()
   } catch {
@@ -42,6 +54,10 @@ export async function POST(request: Request) {
   const login = String(payload.login ?? '').trim()
   const password = String(payload.password ?? '')
   const server = String(payload.server ?? '')
+  const suppliedCode = String(payload.enrollmentCode ?? '')
+  if (!constantTimeMatch(suppliedCode, enrollmentCode)) {
+    return jsonError('Invalid demo enrollment code.', 401)
+  }
   if (!/^\d{4,20}$/.test(login) || password.length < 1 || password.length > 128) {
     return jsonError('Enter a valid MT5 login and trading password.', 400)
   }
