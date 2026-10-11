@@ -1,11 +1,10 @@
 'use client'
 
-import { useState, type CSSProperties, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { DotLottieReact } from '@lottiefiles/dotlottie-react'
 import {
   ArrowRight,
   Check,
-  CirclePercent,
   Eye,
   EyeOff,
   House,
@@ -45,7 +44,6 @@ export function Dashboard({ preview = false }: DashboardProps) {
   const [mentorId, setMentorId] = useState(preview ? DEFAULT_MENTOR_ID : 'Pending setup')
   const [accountDialogOpen, setAccountDialogOpen] = useState(false)
   const [accountSheetOpen, setAccountSheetOpen] = useState(false)
-  const [discountOpen, setDiscountOpen] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [formMessage, setFormMessage] = useState<string | null>(null)
 
@@ -110,7 +108,6 @@ export function Dashboard({ preview = false }: DashboardProps) {
             <p className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-muted-foreground">Your account</p>
             <h1 className="mt-2 text-xl font-extrabold tracking-normal">Profile</h1>
           </div>
-          {preview && <span className="shrink-0 rounded-sm border border-primary/35 px-2.5 py-2 text-[9px] font-extrabold uppercase tracking-[0.15em] text-primary">Preview</span>}
         </header>
       )}
 
@@ -122,7 +119,6 @@ export function Dashboard({ preview = false }: DashboardProps) {
           onConnect={openAccountDialog}
           onSignOut={signOut}
           onAccountDetails={() => setAccountSheetOpen(true)}
-          onDiscount={() => setDiscountOpen(true)}
         />
       ) : (
         <ProfileView preview={preview} mentorId={mentorId} onSignOut={signOut} />
@@ -279,20 +275,6 @@ export function Dashboard({ preview = false }: DashboardProps) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={discountOpen} onOpenChange={setDiscountOpen}>
-        <DialogContent className="border-white/10 bg-[#111114] p-6 text-white sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-extrabold">Student discount</DialogTitle>
-            <DialogDescription className="text-white/55">
-              Your monthly plan discount will appear here when membership is active.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex items-center gap-3 rounded-md border border-primary/20 bg-primary/10 p-4 text-primary">
-            <CirclePercent className="size-6 shrink-0" aria-hidden="true" />
-            <p className="text-sm font-bold">Discounts unlock after account approval.</p>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }
@@ -304,7 +286,6 @@ function HomeView({
   onConnect,
   onSignOut,
   onAccountDetails,
-  onDiscount,
 }: {
   preview: boolean
   accountConnected: boolean
@@ -312,22 +293,18 @@ function HomeView({
   onConnect: () => void
   onSignOut: () => void
   onAccountDetails: () => void
-  onDiscount: () => void
 }) {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col bg-[#0b0b0d]">
-      <section className="relative isolate flex min-h-[48dvh] flex-col overflow-hidden rounded-b-[28px] bg-[#09090b] px-4 pb-6 pt-0 text-white sm:min-h-[520px] sm:px-8 sm:pb-7 sm:rounded-b-[34px]">
+      <section className="relative isolate flex min-h-[min(72svh,620px)] flex-col overflow-hidden rounded-b-[28px] bg-[#09090b] px-4 pb-6 pt-0 text-white sm:min-h-[520px] sm:px-8 sm:pb-7 sm:rounded-b-[34px]">
         <div className="absolute inset-0 -z-20 bg-[linear-gradient(135deg,#09090b_0%,#09090b_40%,#0d0d10_100%)]" aria-hidden="true" />
         <div
           className="absolute inset-y-0 right-0 -z-10 w-[60%] bg-[linear-gradient(135deg,#ef3549_0%,#c61e39_100%)] sm:w-[62%]"
           style={{ clipPath: 'polygon(22% 0, 100% 0, 100% 100%, 0 100%)' }}
           aria-hidden="true"
         />
-        <div className="relative z-10 flex items-center justify-between gap-3 px-0 py-3">
-          <div className="h-6 w-6 rounded-full border border-white/15 bg-white/5" aria-hidden="true" />
-          {preview && <span className="inline-flex items-center gap-1.5 rounded-sm border border-white/30 bg-black/20 px-2.5 py-1.5 text-[9px] font-extrabold uppercase tracking-[0.14em] text-white"><span className="size-1.5 rounded-full bg-[#f2c45d]" aria-hidden="true" />Preview</span>}
-        </div>
-        <div className="absolute inset-x-[7%] top-[7%] h-[62%] sm:inset-x-[18%] sm:top-[2%] sm:h-[70%]" role="img" aria-label="Animated SkuD trading assistant">
+        <div className="relative z-10 h-[calc(env(safe-area-inset-top)+2.75rem)] shrink-0" aria-hidden="true" />
+        <div className="absolute left-1/2 top-[calc(env(safe-area-inset-top)+2.5rem)] aspect-square w-[min(74vw,38svh,25rem)] -translate-x-1/2 sm:top-[2%] sm:w-[min(38vw,27rem)]" role="img" aria-label="Animated SkuD trading assistant">
           <DotLottieReact
             src="/Anima%20Bot.lottie"
             autoplay
@@ -336,11 +313,8 @@ function HomeView({
           />
         </div>
         <div className="relative z-10 mt-auto max-w-[82%] pb-1 sm:max-w-[65%]">
-          <p className="text-[9px] font-extrabold uppercase tracking-[0.2em] text-[#ffc4cd]">{accountConnected ? 'Your trading account' : 'Student workspace'}</p>
+          <p className="text-[9px] font-extrabold uppercase tracking-[0.2em] text-[#ffc4cd]">MT5 account</p>
           <h1 className="mt-2 text-balance text-3xl font-extrabold uppercase leading-[0.96] sm:text-5xl">Good morning,<br />Skud.</h1>
-          {!accountConnected && (
-            <button type="button" onClick={onConnect} className="mt-3 inline-flex min-h-9 items-center gap-2 rounded-sm bg-primary px-3 text-[9px] font-extrabold uppercase tracking-[0.1em] text-white transition-colors hover:bg-primary/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">Sign in to MT5 <ArrowRight className="size-3.5" aria-hidden="true" /></button>
-          )}
         </div>
       </section>
 
@@ -350,7 +324,6 @@ function HomeView({
             <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-white/45">{accountConnected ? 'Account connected' : 'Account access'}</p>
             <p className="mt-1 text-sm font-bold text-white">{accountConnected ? 'Your Deriv MT5' : 'Sign in to Deriv MT5'}</p>
           </div>
-          {preview && <span className="rounded-sm border border-primary/25 bg-primary/10 px-2 py-1 text-[8px] font-extrabold uppercase tracking-[0.12em] text-primary">Preview</span>}
         </div>
         <div className="rounded-md border border-white/10 bg-[#17171b] p-4 sm:p-5">
           {accountConnected && (
@@ -367,7 +340,7 @@ function HomeView({
               <DerivMark className="size-8 shrink-0 rounded-none bg-transparent text-2xl text-primary" />
               <span className="min-w-0"><span className="block text-[8px] font-extrabold uppercase tracking-[0.14em] text-white/45">Login ID</span><span className="mt-1 block truncate font-mono text-sm font-extrabold tabular-nums text-white">{accountConnected ? '345643' : 'Not connected'}</span></span>
             </button>
-            {accountConnected ? <button type="button" onClick={onDiscount} className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-sm bg-primary px-3 text-[9px] font-extrabold uppercase tracking-[0.08em] text-white transition-colors hover:bg-primary/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"><CirclePercent className="size-3.5" aria-hidden="true" />Discount</button> : <button type="button" onClick={onConnect} className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-sm bg-primary px-3 text-[9px] font-extrabold uppercase tracking-[0.08em] text-white transition-colors hover:bg-primary/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">Sign in <ArrowRight className="size-3.5" aria-hidden="true" /></button>}
+            {accountConnected ? <button type="button" onClick={onSignOut} className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-sm border border-white/15 px-3 text-[9px] font-extrabold uppercase tracking-[0.08em] text-white/75 transition-colors hover:border-primary/50 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"><LogOut className="size-3.5" aria-hidden="true" />Disconnect</button> : <button type="button" onClick={onConnect} className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-sm bg-primary px-3 text-[9px] font-extrabold uppercase tracking-[0.08em] text-white transition-colors hover:bg-primary/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">Sign in <ArrowRight className="size-3.5" aria-hidden="true" /></button>}
           </div>
         </div>
         {accountConnected && <p className="mt-3 px-1 text-[9px] leading-relaxed text-white/40">{preview ? 'Preview account details only. Not connected to a broker.' : 'Deriv MT5 account'}</p>}
