@@ -322,6 +322,22 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(self.request("/v1/commands/next?login=111111", token="test-ea-token")[0], 200)
         self.assertEqual(self.request("/v1/commands/next?login=222222", token="test-ea-token")[0], 200)
 
+    def test_bridge_key_auto_registers_mentor_and_publishes_events(self):
+        self.assertEqual(self.provision(login="111111", mentor_id="mentor-skud-01")[0], 200)
+        event = {
+            "mentor_id": "mentor-skud-01", "mentor_name": "SkudTurbo",
+            "login": "987654", "server": "OtherBroker-Demo",
+            "position_id": "123456789",
+            "event_type": "open", "symbol": "EURUSD", "side": "buy", "volume": 0.1,
+        }
+        status, body = self.request("/v1/mentor/events", "POST", BRIDGE_KEY,
+                                    {**event, "event_id": "123456789"})
+        self.assertEqual(status, 202)
+        self.assertEqual(json.loads(body)["queued"], 1)
+        later_status, _ = self.request("/v1/mentor/events", "POST", BRIDGE_KEY,
+                                       {**event, "event_id": "123456790"})
+        self.assertEqual(later_status, 202)
+
     def test_mentor_event_rejects_unregistered_source_account(self):
         self.register_mentor()
         status, body = self.request("/v1/mentor/events", "POST", self.mentor_token, {

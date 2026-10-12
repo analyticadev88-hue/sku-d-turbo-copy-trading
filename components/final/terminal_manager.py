@@ -210,11 +210,13 @@ def ensure_terminal(account: dict) -> tuple[bool, str]:
         _last_launch = time.time()
     warnings: list[str] = []
     try:
-        # MT5 parses startup.ini as ANSI; broker passwords are effectively ASCII.
+        # MT5 parses startup.ini using the system ANSI codepage, so encode with
+        # mbcs on Windows — ascii with errors="replace" would silently corrupt
+        # any non-ASCII password character into "?" and the broker login fails.
+        startup_encoding = "mbcs" if os.name == "nt" else "utf-8"
         (folder / "startup.ini").write_text(
             f"[Common]\r\nLogin={login}\r\nPassword={account['password']}\r\nServer={account['server']}\r\n",
-            encoding="ascii",
-            errors="replace",
+            encoding=startup_encoding,
         )
         if EA_SOURCE and Path(EA_SOURCE).exists():
             experts = folder / "MQL5" / "Experts"

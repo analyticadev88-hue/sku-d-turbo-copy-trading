@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { clearStoredAccount, loadStoredAccount, saveStoredAccount } from './mt5-session'
 import { DerivMark } from './deriv-logo'
 
 const DERIV_SERVERS = [
@@ -58,17 +59,12 @@ export function Dashboard({ preview = false }: DashboardProps) {
 
   useEffect(() => {
     if (preview) return
-    try {
-      const storedAccount = sessionStorage.getItem('skud-mt5-account')
-      if (!storedAccount) return
-      const account = JSON.parse(storedAccount) as Partial<LiveMt5Account>
-      if (!account.login || !account.server || !account.statusToken) return
-      setLiveAccount({ login: account.login, server: account.server, statusToken: account.statusToken })
-      setLiveStatus({ message: 'Waiting for the MT5 terminal and EA login confirmation.' })
-      setAccountConnected(true)
-    } catch {
-      sessionStorage.removeItem('skud-mt5-account')
-    }
+    const account = loadStoredAccount()
+    if (!account) return
+    setLiveAccount(account)
+    setLiveStatus({ message: 'Waiting for the MT5 terminal and EA login confirmation.' })
+    setAccountConnected(true)
+    setMentorId(DEFAULT_MENTOR_ID)
   }, [preview])
 
   useEffect(() => {
@@ -104,8 +100,20 @@ export function Dashboard({ preview = false }: DashboardProps) {
     }
   }, [liveAccount])
 
-  function signOut() {
-    sessionStorage.removeItem('skud-mt5-account')
+  async function signOut() {
+    setAccountSheetOpen(false)
+    const account = liveAccount
+    if (account) {
+      try {
+        await fetch(`/api/mt5/accounts/${encodeURIComponent(account.login)}/disconnect`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${account.statusToken}` },
+        })
+      } catch {
+        // Even if the bridge is unreachable, still end the local session.
+      }
+    }
+    clearStoredAccount()
     setAccountConnected(false)
     setLiveAccount(null)
     setLiveStatus(null)
@@ -151,6 +159,7 @@ export function Dashboard({ preview = false }: DashboardProps) {
       }
 
       setLiveAccount({ login: data.login, server: data.server, statusToken: data.statusToken })
+      saveStoredAccount({ login: data.login, server: data.server, statusToken: data.statusToken })
       setLiveStatus({ message: 'Waiting for the MT5 terminal and EA login confirmation.' })
       setAccountConnected(true)
       setMentorId(DEFAULT_MENTOR_ID)
@@ -223,7 +232,7 @@ export function Dashboard({ preview = false }: DashboardProps) {
       </nav>
 
       <Dialog open={accountDialogOpen} onOpenChange={setAccountDialogOpen}>
-        <DialogContent className="border-white/10 bg-[#111114] p-6 text-white sm:max-w-md">
+        <DialogContent showCloseButton={false} className="top-auto bottom-0 left-0 right-0 max-h-[88dvh] w-full max-w-none translate-x-0 translate-y-0 overflow-y-auto rounded-t-2xl border-white/10 bg-[#111114] p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] text-white sm:top-1/2 sm:bottom-auto sm:left-1/2 sm:right-auto sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl sm:p-6">
           <DialogHeader>
             <DialogTitle className="text-xl font-extrabold">Deriv MT5 account</DialogTitle>
             <DialogDescription>
@@ -334,11 +343,7 @@ export function Dashboard({ preview = false }: DashboardProps) {
           </button>
           <button
             type="button"
-            onClick={() => {
-              setAccountSheetOpen(false)
-              setAccountConnected(false)
-              setTab('home')
-            }}
+            onClick={signOut}
             className="mt-3 inline-flex min-h-11 items-center justify-center gap-2 rounded-sm border border-white/15 px-4 text-xs font-extrabold uppercase tracking-[0.1em] text-white/65 transition-colors hover:border-primary/50 hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           >
             <LogOut className="size-4" aria-hidden="true" />

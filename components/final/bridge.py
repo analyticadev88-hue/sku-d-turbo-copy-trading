@@ -769,8 +769,22 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     (event["mentor_id"],),
                 ).fetchone()
                 supplied_hash = hashlib.sha256(authorization[7:].encode("utf-8")).hexdigest()
+                # Single-mentor deployment: the operator configures the mentor EA
+                # with the bridge key itself, so accept it alongside the per-mentor token.
+                supplied_is_bridge_key = auth_matches(authorization, BRIDGE_KEY)
+                if not mentor and supplied_is_bridge_key:
+                    db.execute(
+                        "INSERT INTO mentors(mentor_id,mentor_name,login,server,token_hash,is_active,created_at,updated_at) "
+                        "VALUES(?,?,?,?,'',1,?,?)",
+                        (event["mentor_id"], event["mentor_name"], event["login"], event["server"], now, now),
+                    )
+                    mentor = db.execute(
+                        "SELECT mentor_name,login,server,is_active,token_hash FROM mentors WHERE mentor_id=?",
+                        (event["mentor_id"],),
+                    ).fetchone()
                 if (not mentor or not mentor["is_active"]
-                        or not hmac.compare_digest(supplied_hash, mentor["token_hash"])):
+                        or (not supplied_is_bridge_key
+                            and not hmac.compare_digest(supplied_hash, mentor["token_hash"]))):
                     return self._send(403, {"error": "Mentor is not registered or is inactive."})
                 if (mentor["login"], mentor["server"]) != (event["login"], event["server"]):
                     return self._send(403, {"error": "Trade event account does not match the registered mentor."})
@@ -830,13 +844,6 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 account = validate_account(self._read_json())
             except (json.JSONDecodeError, ValueError, AttributeError) as error:
                 return self._send(400, {"error": str(error)})
-            if account["mentor_id"]:
-                with db_session() as db:
-                    mentor = db.execute(
-                        "SELECT 1 FROM mentors WHERE mentor_id=? AND is_active=1", (account["mentor_id"],)
-                    ).fetchone()
-                if not mentor:
-                    return self._send(400, {"error": "Selected mentor is not registered or is inactive."})
             now = time.time()
             with db_session() as db:
                 existing = db.execute("SELECT * FROM accounts WHERE login=?", (account["login"],)).fetchone()

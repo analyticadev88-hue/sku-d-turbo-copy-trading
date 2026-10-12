@@ -152,7 +152,7 @@ export function AccessStart() {
                   <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-white/45">
                     MT5 app + server access
                   </p>
-                  <p className="mt-1 text-3xl font-extrabold tracking-tight">$19</p>
+                  <p className="mt-1 text-3xl font-extrabold tracking-tight">$13</p>
                 </div>
                 <div className="flex h-8 items-center gap-1.5 pb-1" aria-label="Card payment">
                   <span className="size-5 rounded-full bg-primary" />
@@ -180,11 +180,11 @@ export function AccessStart() {
               </div>
               <div className="flex items-center justify-between gap-4 py-4 text-sm">
                 <span className="text-white/60">One-time setup fee</span>
-                <span className="font-bold">$19.00 USD</span>
+                <span className="font-bold">$13.00 USD</span>
               </div>
               <div className="flex items-center justify-between gap-4 py-4 text-sm">
                 <span className="font-bold">Total due</span>
-                <span className="text-lg font-extrabold">$19.00 USD</span>
+                <span className="text-lg font-extrabold">$13.00 USD</span>
               </div>
             </div>
 
@@ -194,7 +194,7 @@ export function AccessStart() {
               disabled={isStartingCheckout}
               className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-primary px-5 text-sm font-extrabold text-white transition-colors hover:bg-primary/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-wait disabled:opacity-70"
             >
-              {isStartingCheckout ? 'Preparing test checkout...' : 'Proceed to pay $19'}
+              {isStartingCheckout ? 'Preparing test checkout...' : 'Proceed to pay $13'}
               {!isStartingCheckout && <ArrowRight className="size-4" aria-hidden="true" />}
             </button>
             {checkoutError ? (

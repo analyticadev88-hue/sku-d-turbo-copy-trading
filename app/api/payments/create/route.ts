@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-const PRICE_AMOUNT = 19
+const PRICE_AMOUNT = 13
 const PRICE_CURRENCY = 'usd'
 const NOWPAYMENTS_SANDBOX_URL = 'https://api-sandbox.nowpayments.io/v1'
 const NOWPAYMENTS_LIVE_URL = 'https://api.nowpayments.io/v1'

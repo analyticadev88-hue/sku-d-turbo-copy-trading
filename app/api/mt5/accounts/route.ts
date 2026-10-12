@@ -78,7 +78,7 @@ export async function POST(request: Request) {
     return jsonError('The MT5 terminal could not be started. Check the bridge server.', 502)
   }
 
-  const expires = Math.floor(Date.now() / 1000) + 15 * 60
+  const expires = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60
   const statusSignature = createHmac('sha256', bridgeKey)
     .update(`${login}:${expires}`)
     .digest('base64url')
