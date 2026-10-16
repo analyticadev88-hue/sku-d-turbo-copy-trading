@@ -23,18 +23,20 @@ async function accessState(userId: string) {
       },
     },
   })
-  if (!user) return { status: 'payment_required' as const }
+  if (!user) return { status: 'payment_required' as const, isAdmin: false }
+  if (user.isAdmin) return { status: 'approved' as const, isAdmin: true }
 
   const subscription = user.subscriptions[0]
   if (user.accessStatus === 'APPROVED' && subscription) {
     return {
       status: 'approved' as const,
+      isAdmin: false,
       expiresAt: subscription.expiresAt.toISOString(),
     }
   }
-  if (user.accessStatus === 'REJECTED') return { status: 'rejected' as const }
-  if (user.accessStatus === 'APPROVED') return { status: 'expired' as const }
-  return { status: 'pending' as const }
+  if (user.accessStatus === 'REJECTED') return { status: 'rejected' as const, isAdmin: false }
+  if (user.accessStatus === 'APPROVED') return { status: 'expired' as const, isAdmin: false }
+  return { status: 'pending' as const, isAdmin: false }
 }
 
 export async function GET(request: Request) {

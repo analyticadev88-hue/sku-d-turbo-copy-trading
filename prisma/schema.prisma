@@ -30,6 +30,7 @@ model User {
   id            String         @id @db.Uuid
   email         String         @unique
   accessStatus  AccessStatus   @default(PENDING)
+  isAdmin       Boolean        @default(false)
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   subscriptions Subscription[]

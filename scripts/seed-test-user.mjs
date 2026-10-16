@@ -1,5 +1,6 @@
-// Test-user seeder: creates a real Supabase Auth user and grants it
-// APPROVED access with an ACTIVE subscription so the full dashboard is visible.
+// Test-user seeder: creates real Supabase Auth users for testing.
+// - testing@gmail.com: normal approved user with an ACTIVE subscription.
+// - skudmasima@test.com: admin user (isAdmin) — no payment/subscription needed.
 // Idempotent — safe to run repeatedly.
 //
 // Usage: node --env-file=.env.local scripts/seed-test-user.mjs
@@ -7,8 +8,8 @@
 import { createClient } from '@supabase/supabase-js'
 import { PrismaClient } from '@prisma/client'
 
-const EMAIL = 'testing@gmail.com'
-const PASSWORD = 'testing'
+const TEST_USER = { email: 'testing@gmail.com', password: 'testing', admin: false }
+const ADMIN_USER = { email: 'skudmasima@test.com', password: 'masima123', admin: true }
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -23,43 +24,46 @@ const supabase = createClient(supabaseUrl, serviceRoleKey, {
 })
 const prisma = new PrismaClient()
 
-async function findAuthUserId() {
+async function findAuthUserId(email) {
   let page = 1
   for (;;) {
     const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 200 })
     if (error) throw new Error(`Could not list auth users: ${error.message}`)
-    const found = data.users.find((user) => user.email?.toLowerCase() === EMAIL)
+    const found = data.users.find((user) => user.email?.toLowerCase() === email)
     if (found) return found.id
     if (data.users.length < 200) return null
     page += 1
   }
 }
 
-try {
-  let authUserId = await findAuthUserId()
-
-  if (authUserId) {
-    const { error } = await supabase.auth.admin.updateUserById(authUserId, {
-      password: PASSWORD,
+async function upsertAuthUser({ email, password }) {
+  const existingId = await findAuthUserId(email)
+  if (existingId) {
+    const { error } = await supabase.auth.admin.updateUserById(existingId, {
+      password,
       email_confirm: true,
     })
-    if (error) throw new Error(`Could not update auth user: ${error.message}`)
-    console.log(`Auth user already exists (${authUserId}) — password reset.`)
-  } else {
-    const { data, error } = await supabase.auth.admin.createUser({
-      email: EMAIL,
-      password: PASSWORD,
-      email_confirm: true,
-    })
-    if (error || !data.user) throw new Error(`Could not create auth user: ${error?.message ?? 'no user returned'}`)
-    authUserId = data.user.id
-    console.log(`Auth user created (${authUserId}).`)
+    if (error) throw new Error(`Could not update auth user ${email}: ${error.message}`)
+    console.log(`Auth user already exists (${email}) — password reset.`)
+    return existingId
   }
+  const { data, error } = await supabase.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+  })
+  if (error || !data.user) throw new Error(`Could not create auth user ${email}: ${error?.message ?? 'no user returned'}`)
+  console.log(`Auth user created (${email}, ${data.user.id}).`)
+  return data.user.id
+}
+
+async function seedTestUser() {
+  const authUserId = await upsertAuthUser(TEST_USER)
 
   await prisma.user.upsert({
     where: { id: authUserId },
-    create: { id: authUserId, email: EMAIL, accessStatus: 'APPROVED' },
-    update: { email: EMAIL, accessStatus: 'APPROVED' },
+    create: { id: authUserId, email: TEST_USER.email, accessStatus: 'APPROVED' },
+    update: { email: TEST_USER.email, accessStatus: 'APPROVED' },
   })
 
   const now = new Date()
@@ -84,8 +88,25 @@ try {
   } else {
     console.log('Active subscription already exists — skipped.')
   }
+}
 
-  console.log(`\nDone. Sign in with ${EMAIL} / ${PASSWORD}`)
+async function seedAdminUser() {
+  const authUserId = await upsertAuthUser(ADMIN_USER)
+
+  await prisma.user.upsert({
+    where: { id: authUserId },
+    create: { id: authUserId, email: ADMIN_USER.email, isAdmin: true },
+    update: { email: ADMIN_USER.email, isAdmin: true },
+  })
+  console.log('Admin flag set in database (no subscription required).')
+}
+
+try {
+  await seedTestUser()
+  await seedAdminUser()
+  console.log(`\nDone.`)
+  console.log(`  Test user: ${TEST_USER.email} / ${TEST_USER.password}`)
+  console.log(`  Admin:     ${ADMIN_USER.email} / ${ADMIN_USER.password}`)
 } catch (error) {
   console.error(error instanceof Error ? error.message : error)
   process.exitCode = 1

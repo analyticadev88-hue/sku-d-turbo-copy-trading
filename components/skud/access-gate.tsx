@@ -4,6 +4,7 @@ import Image from 'next/image'
 import { useEffect, useState } from 'react'
 import { AccessFlow } from './access-flow'
 import { AccessStart } from './access-start'
+import { AdminApp } from './admin-app'
 import { Dashboard } from './dashboard'
 import { GetStarted } from './get-started'
 import { loadStoredAccount, type StoredMt5Account } from './mt5-session'
@@ -26,6 +27,7 @@ type AccessState = 'pending' | 'approved' | 'rejected' | 'expired' | 'payment_re
 
 export function AccessGate({ preview, checkout, login }: { preview: boolean; checkout?: string; login?: boolean }) {
   const [access, setAccess] = useState<AccessState | null | undefined>(undefined)
+  const [isAdmin, setIsAdmin] = useState(false)
   const [orderId, setOrderId] = useState<string | undefined>()
   const [stored, setStored] = useState<StoredMt5Account | null>(null)
 
@@ -52,10 +54,11 @@ export function AccessGate({ preview, checkout, login }: { preview: boolean; che
           headers: { Authorization: `Bearer ${token}` },
           cache: 'no-store',
         })
-        const result = await response.json() as { status?: AccessState; error?: string }
+        const result = await response.json() as { status?: AccessState; isAdmin?: boolean; error?: string }
         if (!response.ok) throw new Error(result.error ?? 'Could not verify subscription access.')
         if (!active) return
         setAccess(result.status ?? 'error')
+        setIsAdmin(result.isAdmin === true)
         if (result.status === 'approved') setStored(loadStoredAccount())
       } catch {
         if (active) setAccess('error')
@@ -69,6 +72,8 @@ export function AccessGate({ preview, checkout, login }: { preview: boolean; che
   if (preview) return <Dashboard preview />
 
   if (access === undefined) return <AccessSplash />
+
+  if (isAdmin) return <AdminApp />
 
   if (access === 'error') {
     return (
