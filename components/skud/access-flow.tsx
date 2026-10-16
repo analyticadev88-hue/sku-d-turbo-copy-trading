@@ -327,8 +327,10 @@ export function AccessFlow({
         </div>
         <h1 className="mt-8 text-center text-3xl font-extrabold">{mode === 'signup' ? 'Create your account' : 'Sign in'}</h1>
         <p className="mt-3 text-center text-sm leading-relaxed text-white/55">
-          {orderId
-            ? 'Payment is confirmed. Create the account your mentor will approve.'
+          {mode === 'signup'
+            ? orderId
+              ? 'Payment is confirmed. Create the account your mentor will approve.'
+              : 'Create your account, then complete the hosting payment to get access.'
             : 'Sign in to your mentor-approved SkuD Turbo account.'}
         </p>
         <form onSubmit={handleAuth} className="mt-6 flex flex-col gap-4">
@@ -338,15 +340,15 @@ export function AccessFlow({
           </label>
           <label className="flex flex-col gap-2 text-sm font-semibold text-white/75">
             Password
-            <input name="password" type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength={8} required className="h-11 rounded-md border border-white/15 bg-[#1a1a1e] px-3 text-white outline-none placeholder:text-white/35 focus-visible:border-primary focus-visible:ring-3 focus-visible:ring-ring/50" />
+            <input name="password" type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength={6} required className="h-11 rounded-md border border-white/15 bg-[#1a1a1e] px-3 text-white outline-none placeholder:text-white/35 focus-visible:border-primary focus-visible:ring-3 focus-visible:ring-ring/50" />
           </label>
           <button type="submit" disabled={busy} className="mt-1 inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-5 text-sm font-extrabold text-white transition-colors hover:bg-primary/85 disabled:cursor-wait disabled:opacity-60">
             {busy ? 'Please wait...' : mode === 'signup' ? 'Create account' : 'Sign in'}
           </button>
         </form>
-        {!loginOnly && orderId && (
+        {!loginOnly && (
           <button type="button" onClick={() => { setMode(mode === 'signup' ? 'login' : 'signup'); setMessage(null) }} className="mt-4 w-full text-sm font-semibold text-white/55 transition-colors hover:text-white">
-            {mode === 'signup' ? 'Already registered? Sign in' : 'Need an account? Sign up'}
+            {mode === 'signup' ? 'Already registered? Sign in' : 'Need an account? Create one'}
           </button>
         )}
         {loginOnly && <a href="/dashboard" className="mt-4 block text-center text-sm font-semibold text-white/55 transition-colors hover:text-white">Need access? Start setup</a>}
