@@ -16,13 +16,76 @@ import time
 from pathlib import Path
 
 TERMINALS_DIR = Path(os.environ.get("SKUD_TERMINALS_DIR", r"C:\skud\terminals"))
-EA_SOURCE = os.environ.get("SKUD_EA_SOURCE", "")
-CHART_TEMPLATE = os.environ.get("SKUD_CHART_TEMPLATE", "")
-MENTOR_EA_SOURCE = os.environ.get("SKUD_MENTOR_EA_SOURCE", "")
-MENTOR_CHART_TEMPLATE = os.environ.get("SKUD_MENTOR_CHART_TEMPLATE", "")
 MENTOR_EA_TOKEN = os.environ.get("SKUD_MENTOR_EA_TOKEN", "") or os.environ.get("SKUD_BRIDGE_KEY", "")
 TERMINAL_MASTER = os.environ.get("SKUD_TERMINAL_MASTER", r"C:\skud\mt5-master")
 LAUNCH_STAGGER_SEC = float(os.environ.get("SKUD_LAUNCH_STAGGER_SEC", "5"))
+
+
+def _read_text_any_encoding(raw: bytes) -> str:
+    """Decode .chr/.ini-style bytes the way sync_chart_inputs does."""
+    if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
+        encoding = "utf-16"
+    elif raw.startswith(b"\xef\xbb\xbf"):
+        encoding = "utf-8-sig"
+    elif b"\x00" in raw[:200]:
+        encoding = "utf-16-le"
+    else:
+        encoding = "utf-8"
+    try:
+        return raw.decode(encoding)
+    except (UnicodeDecodeError, ValueError):
+        return ""
+
+
+def _discover_ea(expert_name: str) -> str:
+    """Locate a compiled EA inside the master terminal's Experts folder."""
+    candidate = Path(TERMINAL_MASTER) / "MQL5" / "Experts" / f"{expert_name}.ex5"
+    return str(candidate) if candidate.exists() else ""
+
+
+def _discover_chart_template(expert_name: str) -> str:
+    """Find a saved chart profile that has the given EA attached.
+
+    Scans the master terminal's Profiles/Charts folders so the SKUD_*_CHART_TEMPLATE
+    variables only need to be set to override what the bridge finds on its own.
+    """
+    charts_root = Path(TERMINAL_MASTER) / "MQL5" / "Profiles" / "Charts"
+    if not charts_root.is_dir():
+        return ""
+    for chart in sorted(charts_root.glob("*/*.chr")):
+        try:
+            text = _read_text_any_encoding(chart.read_bytes())
+        except OSError:
+            continue
+        if expert_name in text:
+            return str(chart)
+    return ""
+
+
+def _resolve_env_path(name: str, discovered: str) -> str:
+    """Env var wins only when it points at a real file; otherwise use discovery.
+
+    This keeps a mangled or stale setx value from shadowing a good auto-discovery.
+    """
+    configured = os.environ.get(name) or ""
+    if configured and Path(configured).exists():
+        return configured
+    return discovered
+
+
+EA_SOURCE = _resolve_env_path("SKUD_EA_SOURCE", _discover_ea("SkuDTurboStudentEA"))
+CHART_TEMPLATE = _resolve_env_path("SKUD_CHART_TEMPLATE", _discover_chart_template("SkuDTurboStudentEA"))
+MENTOR_EA_SOURCE = _resolve_env_path("SKUD_MENTOR_EA_SOURCE", _discover_ea("SkuDTurboMentorEA"))
+MENTOR_CHART_TEMPLATE = _resolve_env_path("SKUD_MENTOR_CHART_TEMPLATE", _discover_chart_template("SkuDTurboMentorEA"))
+
+if EA_SOURCE:
+    print(f"SkuD terminal manager: student EA = {EA_SOURCE}")
+if CHART_TEMPLATE:
+    print(f"SkuD terminal manager: student chart = {CHART_TEMPLATE}")
+if MENTOR_EA_SOURCE:
+    print(f"SkuD terminal manager: mentor EA = {MENTOR_EA_SOURCE}")
+if MENTOR_CHART_TEMPLATE:
+    print(f"SkuD terminal manager: mentor chart = {MENTOR_CHART_TEMPLATE}")
 
 _running_cache: tuple[set[str], float] = (set(), 0.0)
 _running_lock = threading.Lock()

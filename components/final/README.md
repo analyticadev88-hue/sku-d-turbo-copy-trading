@@ -27,11 +27,17 @@ controlled VPS only.
 
 `start-bridge.ps1` and `start-all.ps1` use these paths by default. Optional
 `SKUD_TERMINAL_MASTER`, `SKUD_TERMINALS_DIR`, `SKUD_EA_SOURCE`, and
-`SKUD_CHART_TEMPLATE` environment variables override them. Mentor-hosted
-terminals use three additional variables: `SKUD_MENTOR_EA_SOURCE` (compiled
-`SkuDTurboMentorEA.ex5`), `SKUD_MENTOR_CHART_TEMPLATE` (a chart profile with the
-Mentor EA attached), and `SKUD_MENTOR_EA_TOKEN` (the token written into that
-chart; defaults to `SKUD_BRIDGE_KEY` when unset).
+`SKUD_CHART_TEMPLATE` environment variables override them — but all four EA and
+chart variables are **auto-discovered** when unset (or when they point at a
+missing file): the bridge finds `SkuDTurboStudentEA.ex5` /
+`SkuDTurboMentorEA.ex5` in the master terminal's `MQL5\Experts` and locates the
+saved chart profiles by scanning `MQL5\Profiles\Charts` for the chart that has
+each EA attached. It prints what it found at startup. Set the variables only to
+override the discovery. Mentor-hosted terminals use three additional optional
+variables: `SKUD_MENTOR_EA_SOURCE` (compiled `SkuDTurboMentorEA.ex5`),
+`SKUD_MENTOR_CHART_TEMPLATE` (a chart profile with the Mentor EA attached), and
+`SKUD_MENTOR_EA_TOKEN` (the token written into that chart; defaults to
+`SKUD_BRIDGE_KEY` when unset).
 
 The public hostname is controlled by the `SKUD_BRIDGE_HOST` environment
 variable (Caddyfile; falls back to `skud.toporapula.dev`). The app never talks
