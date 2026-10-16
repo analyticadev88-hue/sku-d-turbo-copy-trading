@@ -3,6 +3,7 @@
 import Image from 'next/image'
 import { useEffect, useState, type FormEvent } from 'react'
 import { getBrowserSupabase } from '@/lib/supabase'
+import { DerivMark } from './deriv-logo'
 
 type AccessStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'payment_required'
 
@@ -234,20 +235,24 @@ export function AccessFlow({
 
   if (accessStatus === 'pending' || accessStatus === 'rejected') {
     return (
-      <main className="flex min-h-dvh flex-col items-center justify-center bg-background px-5 text-center text-foreground">
-        <Image src="/logo-synth.webp" alt="Synthyard EA Hosting" width={60} height={60} className="size-12 rounded-xl object-cover" />
+      <main className="relative isolate flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-[#0b0b0d] px-5 text-center text-white">
+        <div
+          className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_80%_15%,rgba(255,68,79,0.12),transparent_48%)]"
+          aria-hidden="true"
+        />
+        <DerivMark className="size-12 rounded-xl text-2xl" />
         <p className="mt-5 text-xs font-extrabold uppercase tracking-[0.25em] text-primary">SkuD Turbo</p>
         <h1 className="mt-4 text-2xl font-extrabold">
           {accessStatus === 'pending' ? 'Awaiting mentor approval' : 'Access not approved'}
         </h1>
-        <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">
+        <p className="mt-3 max-w-md text-sm leading-relaxed text-white/55">
           {accessStatus === 'pending'
             ? 'Your account is registered. A mentor must approve your subscription before the dashboard becomes available.'
             : 'Please contact your mentor for more information about this account.'}
         </p>
         <div className="mt-6 flex gap-3">
           {accessStatus === 'pending' && (
-            <button type="button" disabled={busy} onClick={() => void refreshApproval()} className="rounded-md bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground disabled:opacity-60">
+            <button type="button" disabled={busy} onClick={() => void refreshApproval()} className="rounded-md bg-primary px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
               {busy ? 'Checking...' : 'Check approval'}
             </button>
           )}
@@ -257,26 +262,31 @@ export function AccessFlow({
               await getBrowserSupabase().auth.signOut()
               window.location.assign('/dashboard?login=1')
             }}
-            className="rounded-md border border-border px-4 py-2.5 text-sm font-bold"
+            className="rounded-md border border-white/15 px-4 py-2.5 text-sm font-bold text-white/75 transition-colors hover:text-white"
           >
             Sign out
           </button>
         </div>
-        {message && <p role="status" className="mt-4 max-w-sm text-xs text-muted-foreground">{message}</p>}
+        {message && <p role="status" className="mt-4 max-w-sm text-xs text-white/45">{message}</p>}
       </main>
     )
   }
 
   if (accessStatus === 'approved') {
     return (
-      <main className="flex min-h-dvh items-center justify-center bg-background px-5 text-center text-foreground">
-        <div>
-          <p className="text-xs font-extrabold uppercase tracking-[0.25em] text-primary">SkuD Turbo</p>
+      <main className="relative isolate flex min-h-dvh items-center justify-center overflow-hidden bg-[#0b0b0d] px-5 text-center text-white">
+        <div
+          className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_80%_15%,rgba(255,68,79,0.12),transparent_48%)]"
+          aria-hidden="true"
+        />
+        <div className="flex flex-col items-center">
+          <DerivMark className="size-12 rounded-xl text-2xl" />
+          <p className="mt-5 text-xs font-extrabold uppercase tracking-[0.25em] text-primary">SkuD Turbo</p>
           <h1 className="mt-4 text-2xl font-extrabold">Subscription approved</h1>
-          <p className="mt-3 text-sm text-muted-foreground">
+          <p className="mt-3 text-sm text-white/55">
             Access is active until {expiresAt ? new Date(expiresAt).toLocaleDateString() : 'your renewal date'}.
           </p>
-          <a href="/dashboard" className="mt-6 inline-flex rounded-md bg-primary px-5 py-3 text-sm font-extrabold text-primary-foreground">
+          <a href="/dashboard" className="mt-6 inline-flex rounded-md bg-primary px-5 py-3 text-sm font-extrabold text-white transition-colors hover:bg-primary/85">
             Open SkuD Turbo
           </a>
         </div>
@@ -286,12 +296,18 @@ export function AccessFlow({
 
   if (accessStatus === 'expired') {
     return (
-      <main className="flex min-h-dvh flex-col items-center justify-center bg-[#0b0b0d] px-5 text-center text-white">
-        <h1 className="text-2xl font-bold">Subscription expired</h1>
+      <main className="relative isolate flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-[#0b0b0d] px-5 text-center text-white">
+        <div
+          className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_80%_15%,rgba(255,68,79,0.12),transparent_48%)]"
+          aria-hidden="true"
+        />
+        <DerivMark className="size-12 rounded-xl text-2xl" />
+        <p className="mt-5 text-xs font-extrabold uppercase tracking-[0.25em] text-primary">SkuD Turbo</p>
+        <h1 className="mt-4 text-2xl font-bold">Subscription expired</h1>
         <p className="mt-3 max-w-sm text-sm leading-relaxed text-white/60">
           Renew your hosting setup, then ask a mentor to approve the next subscription period.
         </p>
-        <a href="/dashboard" className="mt-6 rounded-md bg-white px-5 py-3 text-sm font-extrabold text-black">
+        <a href="/dashboard" className="mt-6 rounded-md bg-primary px-5 py-3 text-sm font-extrabold text-white transition-colors hover:bg-primary/85">
           Renew access
         </a>
       </main>
@@ -299,33 +315,42 @@ export function AccessFlow({
   }
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-background px-5 py-10 text-foreground">
-      <section className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl sm:p-8">
-        <p className="text-[10px] font-extrabold uppercase tracking-[0.24em] text-primary">SkuD Turbo</p>
-        <h1 className="mt-3 text-2xl font-extrabold">{mode === 'signup' ? 'Create your account' : 'Sign in'}</h1>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          {orderId ? 'Payment is confirmed. Create or sign in to the account your mentor will approve.' : 'Sign in to check your mentor-approved subscription.'}
+    <main className="relative isolate flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-[#0b0b0d] px-5 py-10 text-white">
+      <div
+        className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_80%_15%,rgba(255,68,79,0.12),transparent_48%)]"
+        aria-hidden="true"
+      />
+      <section className="w-full max-w-md">
+        <div className="flex flex-col items-center">
+          <DerivMark className="size-12 rounded-xl text-2xl" />
+          <p className="mt-4 text-xs font-extrabold uppercase tracking-[0.24em] text-primary">SkuD Turbo</p>
+        </div>
+        <h1 className="mt-8 text-center text-3xl font-extrabold">{mode === 'signup' ? 'Create your account' : 'Sign in'}</h1>
+        <p className="mt-3 text-center text-sm leading-relaxed text-white/55">
+          {orderId
+            ? 'Payment is confirmed. Create the account your mentor will approve.'
+            : 'Sign in to your mentor-approved SkuD Turbo account.'}
         </p>
         <form onSubmit={handleAuth} className="mt-6 flex flex-col gap-4">
-          <label className="flex flex-col gap-2 text-sm font-semibold">
+          <label className="flex flex-col gap-2 text-sm font-semibold text-white/75">
             Email
-            <input name="email" type="email" autoComplete="email" required className="h-11 rounded-md border border-input bg-background px-3" />
+            <input name="email" type="email" autoComplete="email" required className="h-11 rounded-md border border-white/15 bg-[#1a1a1e] px-3 text-white outline-none placeholder:text-white/35 focus-visible:border-primary focus-visible:ring-3 focus-visible:ring-ring/50" />
           </label>
-          <label className="flex flex-col gap-2 text-sm font-semibold">
+          <label className="flex flex-col gap-2 text-sm font-semibold text-white/75">
             Password
-            <input name="password" type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength={8} required className="h-11 rounded-md border border-input bg-background px-3" />
+            <input name="password" type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength={8} required className="h-11 rounded-md border border-white/15 bg-[#1a1a1e] px-3 text-white outline-none placeholder:text-white/35 focus-visible:border-primary focus-visible:ring-3 focus-visible:ring-ring/50" />
           </label>
-          <button type="submit" disabled={busy} className="mt-1 inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-5 text-sm font-extrabold text-primary-foreground disabled:cursor-wait disabled:opacity-60">
+          <button type="submit" disabled={busy} className="mt-1 inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-5 text-sm font-extrabold text-white transition-colors hover:bg-primary/85 disabled:cursor-wait disabled:opacity-60">
             {busy ? 'Please wait...' : mode === 'signup' ? 'Create account' : 'Sign in'}
           </button>
         </form>
         {!loginOnly && orderId && (
-          <button type="button" onClick={() => { setMode(mode === 'signup' ? 'login' : 'signup'); setMessage(null) }} className="mt-4 w-full text-sm font-semibold text-muted-foreground hover:text-foreground">
+          <button type="button" onClick={() => { setMode(mode === 'signup' ? 'login' : 'signup'); setMessage(null) }} className="mt-4 w-full text-sm font-semibold text-white/55 transition-colors hover:text-white">
             {mode === 'signup' ? 'Already registered? Sign in' : 'Need an account? Sign up'}
           </button>
         )}
-        {loginOnly && <a href="/dashboard" className="mt-4 block text-center text-sm font-semibold text-muted-foreground hover:text-foreground">Need access? Start setup</a>}
-        {message && <p role="status" className="mt-4 rounded-md border border-border px-3 py-2 text-xs leading-relaxed text-muted-foreground">{message}</p>}
+        {loginOnly && <a href="/dashboard" className="mt-4 block text-center text-sm font-semibold text-white/55 transition-colors hover:text-white">Need access? Start setup</a>}
+        {message && <p role="status" className="mt-4 rounded-md border border-white/15 bg-white/5 px-3 py-2 text-xs leading-relaxed text-white/65">{message}</p>}
       </section>
     </main>
   )

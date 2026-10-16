@@ -1,12 +1,9 @@
 'use client'
 
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { DotLottieReact } from '@lottiefiles/dotlottie-react'
 import {
   ArrowRight,
-  Check,
-  Eye,
-  EyeOff,
   House,
   LogOut,
   UserRound,
@@ -19,22 +16,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { clearStoredAccount, loadStoredAccount, saveStoredAccount } from './mt5-session'
+import { clearStoredAccount, loadStoredAccount } from './mt5-session'
 import { DerivMark } from './deriv-logo'
+import { Mt5ConnectDialog } from './mt5-connect'
 
-const DERIV_SERVERS = [
-  'Deriv-Demo',
-  'DerivBVI-Demo',
-  'DerivSVG-Demo',
-  'DerivSVG-Server',
-  'DerivSVG-Server-02',
-  'DerivSVG-Server-03',
-  'DerivBVI-Server',
-  'DerivBVI-Server-02',
-  'DerivBVI-Server-03',
-]
 const DEFAULT_MENTOR_ID = 'SkudTurbo'
 
 type DashboardProps = { preview?: boolean }
@@ -55,8 +40,6 @@ export function Dashboard({ preview = false }: DashboardProps) {
   const [liveStatus, setLiveStatus] = useState<Mt5Status | null>(null)
   const [accountDialogOpen, setAccountDialogOpen] = useState(false)
   const [accountSheetOpen, setAccountSheetOpen] = useState(false)
-  const [showPassword, setShowPassword] = useState(false)
-  const [formMessage, setFormMessage] = useState<string | null>(null)
 
   useEffect(() => {
     if (preview) return
@@ -138,68 +121,7 @@ export function Dashboard({ preview = false }: DashboardProps) {
     window.location.assign('/dashboard?login=1')
   }
 
-  async function submitAccount(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-
-    const form = event.currentTarget
-    const formData = new FormData(form)
-    const login = String(formData.get('login') ?? '').trim()
-    const password = String(formData.get('password') ?? '')
-    const server = String(formData.get('server') ?? '')
-
-    if (preview) {
-      form.reset()
-      setShowPassword(false)
-      setFormMessage('Connection is not enabled in this preview. Your details were cleared and not sent.')
-      return
-    }
-
-    setFormMessage('Connecting your MT5 account...')
-
-    try {
-      const { data: sessionData } = await getBrowserSupabase().auth.getSession()
-      const accessToken = sessionData.session?.access_token
-      if (!accessToken) throw new Error('Sign in to your approved account before connecting MT5.')
-      const response = await fetch('/api/mt5/accounts', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-supabase-access-token': accessToken,
-        },
-        body: JSON.stringify({ login, password, server }),
-      })
-
-      const data = (await response.json()) as {
-        error?: string
-        login?: string
-        server?: string
-        statusToken?: string
-      }
-      if (!response.ok) {
-        throw new Error(data.error ?? 'Could not connect your MT5 account.')
-      }
-      if (!data.login || !data.server || !data.statusToken) {
-        throw new Error('The MT5 service returned incomplete account details.')
-      }
-
-      setLiveAccount({ login: data.login, server: data.server, statusToken: data.statusToken })
-      saveStoredAccount({ login: data.login, server: data.server, statusToken: data.statusToken })
-      setLiveStatus({ message: 'Waiting for the MT5 terminal and EA login confirmation.' })
-      setAccountConnected(true)
-      setMentorId(DEFAULT_MENTOR_ID)
-      form.reset()
-      setShowPassword(false)
-      setFormMessage(null)
-      setAccountDialogOpen(false)
-      setAccountSheetOpen(true)
-    } catch (error) {
-      setFormMessage(error instanceof Error ? error.message : 'Could not connect your MT5 account.')
-    }
-  }
-
   function openAccountDialog() {
-    setFormMessage(null)
-    setShowPassword(false)
     setAccountDialogOpen(true)
   }
 
@@ -255,81 +177,7 @@ export function Dashboard({ preview = false }: DashboardProps) {
         </div>
       </nav>
 
-      <Dialog open={accountDialogOpen} onOpenChange={setAccountDialogOpen}>
-        <DialogContent showCloseButton={false} className="top-auto bottom-0 left-0 right-0 max-h-[88dvh] w-full max-w-none translate-x-0 translate-y-0 overflow-y-auto rounded-t-2xl border-white/10 bg-[#111114] p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] text-white sm:top-1/2 sm:bottom-auto sm:left-1/2 sm:right-auto sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl sm:p-6">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-extrabold">Deriv MT5 account</DialogTitle>
-            <DialogDescription>
-              {preview
-                ? 'Enter your MT5 login, trading password, and server. This screen is a UI preview; credentials are not submitted.'
-                : 'Enter your MT5 login, trading password, and server. We will use the configured bridge to provision the connection.'}
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={submitAccount} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="dashboard-mt5-login" className="text-white/75">MT5 login</Label>
-              <Input
-                id="dashboard-mt5-login"
-                name="login"
-                inputMode="numeric"
-                pattern="[0-9]{4,20}"
-                placeholder="Enter account login"
-                autoComplete="off"
-                required
-                className="h-11 border-white/15 bg-[#1a1a1e] text-white placeholder:text-white/35"
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="dashboard-mt5-password" className="text-white/75">MT5 trading password</Label>
-              <div className="relative">
-                <Input
-                  id="dashboard-mt5-password"
-                  name="password"
-                  type={showPassword ? 'text' : 'password'}
-                  autoComplete="new-password"
-                  required
-                  maxLength={128}
-                  className="h-11 border-white/15 bg-[#1a1a1e] pr-12 text-white placeholder:text-white/35"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((visible) => !visible)}
-                  aria-label={showPassword ? 'Hide MT5 password' : 'Show MT5 password'}
-                  title={showPassword ? 'Hide password' : 'Show password'}
-                  className="absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center text-white/50 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-ring"
-                >
-                  {showPassword ? <EyeOff className="size-4" aria-hidden="true" /> : <Eye className="size-4" aria-hidden="true" />}
-                </button>
-              </div>
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="dashboard-mt5-server" className="text-white/75">Deriv server</Label>
-              <select
-                id="dashboard-mt5-server"
-                name="server"
-                required
-                defaultValue=""
-                className="h-11 w-full rounded-md border border-white/15 bg-[#1a1a1e] px-3 text-sm text-white outline-none focus-visible:border-primary focus-visible:ring-3 focus-visible:ring-ring/50"
-              >
-                <option value="" disabled>Choose your server</option>
-                {DERIV_SERVERS.map((server) => <option key={server}>{server}</option>)}
-              </select>
-            </div>
-            <button
-              type="submit"
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-primary px-5 text-sm font-extrabold text-white transition-colors hover:bg-primary/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
-            >
-              {preview ? 'Preview connection' : 'Connect account'}
-              <ArrowRight className="size-4" aria-hidden="true" />
-            </button>
-            {formMessage && (
-              <p role="status" className="rounded-sm border border-white/10 px-3 py-2 text-xs leading-relaxed text-white/60">
-                {formMessage}
-              </p>
-            )}
-          </form>
-        </DialogContent>
-      </Dialog>
+      <Mt5ConnectDialog open={accountDialogOpen} onOpenChange={setAccountDialogOpen} preview={preview} />
 
       <Dialog open={accountSheetOpen} onOpenChange={setAccountSheetOpen}>
         <DialogContent className="top-auto bottom-3 left-3 right-3 max-h-[82dvh] w-auto translate-x-0 translate-y-0 overflow-y-auto rounded-t-xl border-white/10 bg-[#111114] p-5 text-white sm:top-1/2 sm:bottom-auto sm:left-1/2 sm:right-auto sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-md sm:p-6">

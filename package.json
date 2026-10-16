@@ -8,9 +8,9 @@
     "build": "next build --webpack",
     "start": "next start",
     "postinstall": "prisma generate",
-    "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "db:migrate": "prisma migrate deploy"
+    "db:generate": "node --env-file=.env.local node_modules/prisma/build/index.js generate",
+    "db:push": "node --env-file=.env.local node_modules/prisma/build/index.js db push",
+    "db:migrate": "node --env-file=.env.local node_modules/prisma/build/index.js migrate deploy"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

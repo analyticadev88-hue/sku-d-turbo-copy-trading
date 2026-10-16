@@ -4,8 +4,8 @@ import Image from 'next/image'
 import { useEffect, useState } from 'react'
 import { AccessFlow } from './access-flow'
 import { AccessStart } from './access-start'
-import { CheckoutReturn } from './checkout-return'
 import { Dashboard } from './dashboard'
+import { GetStarted } from './get-started'
 import { loadStoredAccount, type StoredMt5Account } from './mt5-session'
 import { getBrowserSupabase } from '@/lib/supabase'
 
@@ -81,7 +81,7 @@ export function AccessGate({ preview, checkout, login }: { preview: boolean; che
     )
   }
 
-  if (access === 'approved') return stored ? <Dashboard /> : <CheckoutReturn />
+  if (access === 'approved') return stored ? <Dashboard /> : <GetStarted />
   if (access === 'pending' || access === 'rejected') {
     return <AccessFlow initialAccessStatus={access} orderId={orderId} />
   }

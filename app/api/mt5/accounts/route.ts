@@ -1,17 +1,6 @@
 import { createHmac } from 'node:crypto'
 import { requireApprovedUser } from '@/lib/access-control'
-
-const DERIV_SERVERS = [
-  'Deriv-Demo',
-  'DerivBVI-Demo',
-  'DerivSVG-Demo',
-  'DerivSVG-Server',
-  'DerivSVG-Server-02',
-  'DerivSVG-Server-03',
-  'DerivBVI-Server',
-  'DerivBVI-Server-02',
-  'DerivBVI-Server-03',
-]
+import { DERIV_SERVERS } from '@/lib/mt5-servers'
 
 function jsonError(error: string, status: number) {
   return Response.json({ error }, { status, headers: { 'Cache-Control': 'no-store' } })
