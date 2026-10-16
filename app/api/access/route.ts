@@ -23,20 +23,22 @@ async function accessState(userId: string) {
       },
     },
   })
-  if (!user) return { status: 'payment_required' as const, isAdmin: false }
-  if (user.isAdmin) return { status: 'approved' as const, isAdmin: true }
+  if (!user) return { status: 'payment_required' as const, isAdmin: false, mentorId: null }
+  if (user.isAdmin) return { status: 'approved' as const, isAdmin: true, mentorId: null }
+  if (user.mentorId) return { status: 'approved' as const, isAdmin: false, mentorId: user.mentorId }
 
   const subscription = user.subscriptions[0]
   if (user.accessStatus === 'APPROVED' && subscription) {
     return {
       status: 'approved' as const,
       isAdmin: false,
+      mentorId: null,
       expiresAt: subscription.expiresAt.toISOString(),
     }
   }
-  if (user.accessStatus === 'REJECTED') return { status: 'rejected' as const, isAdmin: false }
-  if (user.accessStatus === 'APPROVED') return { status: 'expired' as const, isAdmin: false }
-  return { status: 'pending' as const, isAdmin: false }
+  if (user.accessStatus === 'REJECTED') return { status: 'rejected' as const, isAdmin: false, mentorId: null }
+  if (user.accessStatus === 'APPROVED') return { status: 'expired' as const, isAdmin: false, mentorId: null }
+  return { status: 'pending' as const, isAdmin: false, mentorId: null }
 }
 
 export async function GET(request: Request) {

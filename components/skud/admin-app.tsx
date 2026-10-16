@@ -2,13 +2,22 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { House, Users } from 'lucide-react'
+import { Cable, GraduationCap, LineChart, Users } from 'lucide-react'
 import { getBrowserSupabase } from '@/lib/supabase'
 import { DerivMark } from './deriv-logo'
 import { AdminClients } from './admin-clients'
+import { AdminMentors } from './admin-mentors'
+import { AdminMt5 } from './admin-mt5'
 import { AdminTrade } from './admin-trade'
 
-type AdminTab = 'home' | 'clients'
+export type AdminTab = 'home' | 'clients' | 'mentors' | 'mt5'
+
+const TABS: { id: AdminTab; label: string; icon: typeof LineChart }[] = [
+  { id: 'home', label: 'Home', icon: LineChart },
+  { id: 'clients', label: 'Clients', icon: Users },
+  { id: 'mentors', label: 'Mentors', icon: GraduationCap },
+  { id: 'mt5', label: 'MT5', icon: Cable },
+]
 
 export function AdminApp() {
   const [tab, setTab] = useState<AdminTab>('home')
@@ -43,32 +52,26 @@ export function AdminApp() {
       </header>
 
       <div className="mx-auto w-full max-w-6xl flex-1 px-5 pb-28 pt-6 sm:px-8">
-        {tab === 'home' ? <AdminTrade /> : <AdminClients />}
+        {tab === 'home' && <AdminTrade switchTab={setTab} />}
+        {tab === 'clients' && <AdminClients />}
+        {tab === 'mentors' && <AdminMentors />}
+        {tab === 'mt5' && <AdminMt5 switchTab={setTab} />}
       </div>
 
-      <nav
-        aria-label="Admin navigation"
-        className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[#111114]/95 pb-[max(env(safe-area-inset-bottom),0.75rem)] backdrop-blur"
-      >
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-center gap-2 px-3 py-2">
-          <button
-            type="button"
-            onClick={() => setTab('home')}
-            aria-current={tab === 'home' ? 'page' : undefined}
-            className={`inline-flex items-center gap-2 rounded-full px-6 py-2.5 text-xs font-extrabold uppercase tracking-[0.15em] transition-all ${tab === 'home' ? 'bg-primary text-white' : 'text-white/55 hover:text-white'}`}
-          >
-            <House className="size-4" aria-hidden="true" />
-            Home
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab('clients')}
-            aria-current={tab === 'clients' ? 'page' : undefined}
-            className={`inline-flex items-center gap-2 rounded-full px-6 py-2.5 text-xs font-extrabold uppercase tracking-[0.15em] transition-all ${tab === 'clients' ? 'bg-primary text-white' : 'text-white/55 hover:text-white'}`}
-          >
-            <Users className="size-4" aria-hidden="true" />
-            Clients
-          </button>
+      <nav aria-label="Admin navigation" className="fixed inset-x-0 bottom-4 z-30 flex justify-center">
+        <div className="flex items-center gap-1 rounded-full border border-white/10 bg-[#111114]/95 px-2 py-2 shadow-[0_12px_40px_rgba(0,0,0,0.5)] backdrop-blur">
+          {TABS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTab(id)}
+              aria-current={tab === id ? 'page' : undefined}
+              className={`inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-[11px] font-extrabold uppercase tracking-[0.14em] transition-all ${tab === id ? 'bg-primary text-white' : 'text-white/55 hover:text-white'}`}
+            >
+              <Icon className="size-4" aria-hidden="true" />
+              {label}
+            </button>
+          ))}
         </div>
       </nav>
     </main>

@@ -1,6 +1,6 @@
 // SkuD student execution EA. Runs only on VPS-managed follower accounts.
 #property strict
-#property version "8.00"
+#property version "8.10"
 
 input string BridgeUrl = "http://127.0.0.1:8765";
 // Fixed at compile time on purpose. Chart profiles (.chr) can only override
@@ -10,8 +10,9 @@ input string EaToken = "";
 input int PollSeconds = 1;
 input int SlippagePoints = 20;
 // Fixed list, not an input: chart profiles cannot override it, so a stale
-// .chr can never resurrect old symbol names or typos on any terminal.
-string ReportSymbols = "XAUUSD";
+// .chr can never resurrect old symbol names or typos on any terminal. Full
+// Deriv forex/metals coverage (30 symbols); synthetic indices stay excluded.
+string ReportSymbols = "EURUSD,GBPUSD,USDJPY,USDCHF,USDCAD,AUDUSD,NZDUSD,EURGBP,EURJPY,GBPJPY,EURCHF,EURCAD,EURAUD,EURNZD,GBPCHF,GBPCAD,GBPAUD,GBPNZD,AUDJPY,AUDCHF,AUDCAD,AUDNZD,CADJPY,CADCHF,CHFJPY,NZDJPY,NZDCHF,NZDCAD,XAUUSD,XAGUSD";
 input int ReportSeconds = 3;
 
 ulong g_last_status_ms = 0;
@@ -30,7 +31,7 @@ int OnInit()
    if(PollSeconds < 1 || ReportSeconds < 1 || StringLen(EaToken) < 32)
       return INIT_PARAMETERS_INCORRECT;
    EventSetTimer(PollSeconds);
-   Print("SkuD Student EA build 8.00 ready. MT5 login: ", (long)AccountInfoInteger(ACCOUNT_LOGIN));
+   Print("SkuD Student EA build 8.10 ready. MT5 login: ", (long)AccountInfoInteger(ACCOUNT_LOGIN));
    Print("Allow WebRequest for ", BridgeUrl, " in MT5 Options > Expert Advisors.");
    return INIT_SUCCEEDED;
 }

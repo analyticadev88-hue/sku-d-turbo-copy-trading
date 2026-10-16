@@ -39,6 +39,38 @@ export async function GET(request: Request) {
   const access = await requireAdmin(request)
   if ('error' in access) return access.error
 
+  const bridgeUrl = process.env.SKUD_BRIDGE_URL
+  const bridgeKey = process.env.SKUD_BRIDGE_KEY
+  if (!bridgeUrl || !bridgeKey) {
+    return jsonError('MT5 bridge configuration is incomplete.', 502)
+  }
+
+  const url = new URL(request.url)
+  const pricesLogin = url.searchParams.get('prices')?.trim() ?? ''
+  if (pricesLogin) {
+    if (!/^\d{4,20}$/.test(pricesLogin)) {
+      return jsonError('Enter a valid MT5 login.', 400)
+    }
+    let pricesResponse: Response
+    try {
+      pricesResponse = await fetch(
+        `${bridgeUrl.replace(/\/$/, '')}/v1/prices?login=${encodeURIComponent(pricesLogin)}`,
+        {
+          headers: { Authorization: `Bearer ${bridgeKey}` },
+          cache: 'no-store',
+          signal: AbortSignal.timeout(10_000),
+        },
+      )
+    } catch {
+      return jsonError('Could not reach the MT5 bridge.', 502)
+    }
+    const pricesBody = await pricesResponse.json().catch(() => null)
+    return Response.json(pricesBody ?? { error: 'Invalid response from the MT5 bridge.' }, {
+      status: pricesResponse.status,
+      headers: { 'Cache-Control': 'no-store' },
+    })
+  }
+
   const result = await fetchBridgeAccounts()
   if ('error' in result) return jsonError(result.error, 502)
   return Response.json({ accounts: result.accounts }, { headers: { 'Cache-Control': 'no-store' } })
@@ -50,7 +82,7 @@ export async function POST(request: Request) {
   const access = await requireAdmin(request)
   if ('error' in access) return access.error
 
-  let payload: { symbol?: unknown; side?: unknown; volume?: unknown }
+  let payload: { symbol?: unknown; side?: unknown; volume?: unknown; mirrorLogin?: unknown }
   try {
     payload = await request.json() as typeof payload
   } catch {
@@ -63,6 +95,7 @@ export async function POST(request: Request) {
   if (!symbol || (side !== 'BUY' && side !== 'SELL') || !Number.isFinite(volume) || volume < 0.01 || volume > 100) {
     return jsonError('Enter a symbol, choose BUY or SELL, and a volume between 0.01 and 100.', 400)
   }
+  const mirrorLogin = typeof payload.mirrorLogin === 'string' ? payload.mirrorLogin.trim() : ''
 
   const bridgeUrl = process.env.SKUD_BRIDGE_URL
   const bridgeKey = process.env.SKUD_BRIDGE_KEY
@@ -111,6 +144,43 @@ export async function POST(request: Request) {
       return { login, ok: false, error: error instanceof Error ? error.message : 'Could not reach the MT5 bridge.' }
     }
   }))
+
+  if (mirrorLogin) {
+    const mirrorActive = activeAccounts.some((account) =>
+      String(account.login ?? '') === mirrorLogin && Boolean(account.is_active))
+    if (mirrorActive) {
+      try {
+        const orderResponse = await fetch(`${bridgeUrl.replace(/\/$/, '')}/v1/orders`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${bridgeKey}`,
+            'Content-Type': 'application/json',
+            'Idempotency-Key': randomUUID(),
+          },
+          body: JSON.stringify({
+            login: mirrorLogin,
+            orders: [{
+              symbol,
+              order_type: side === 'BUY' ? 'MARKET_BUY' : 'MARKET_SELL',
+              volume,
+              tp_enabled: false,
+              sl_enabled: false,
+            }],
+          }),
+          signal: AbortSignal.timeout(10_000),
+        })
+        if (!orderResponse.ok) {
+          const body = await orderResponse.json().catch(() => null) as { error?: string } | null
+          results.push({ login: mirrorLogin, ok: false, error: body?.error ?? `The bridge returned status ${orderResponse.status}.` })
+        } else {
+          const body = await orderResponse.json().catch(() => null) as { orders?: { status?: string }[] } | null
+          results.push({ login: mirrorLogin, ok: true, status: body?.orders?.[0]?.status ?? 'queued' })
+        }
+      } catch (error) {
+        results.push({ login: mirrorLogin, ok: false, error: error instanceof Error ? error.message : 'Could not reach the MT5 bridge.' })
+      }
+    }
+  }
 
   return Response.json(
     { results, count: results.length },

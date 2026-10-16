@@ -83,9 +83,14 @@ class BridgeTests(unittest.TestCase):
             db.execute("DELETE FROM mentors")
             db.execute("DELETE FROM accounts")
 
-    def provision(self, login="123456", password="secret-pass", server="DerivSVG-Server-02", mentor_id=""):
-        return self.request("/v1/accounts", "POST", BRIDGE_KEY,
-                            {"login": login, "password": password, "server": server, "mentor_id": mentor_id})
+    def provision(self, login="123456", password="secret-pass", server="DerivSVG-Server-02", mentor_id="",
+                  volume_multiplier=None, role=None):
+        payload = {"login": login, "password": password, "server": server, "mentor_id": mentor_id}
+        if volume_multiplier is not None:
+            payload["volume_multiplier"] = volume_multiplier
+        if role is not None:
+            payload["role"] = role
+        return self.request("/v1/accounts", "POST", BRIDGE_KEY, payload)
 
     def register_mentor(self):
         status, body = self.request("/v1/mentors", "POST", BRIDGE_KEY, {
@@ -557,6 +562,188 @@ class BridgeTests(unittest.TestCase):
                                       {"login": "123456", "password": "", "server": "Demo"})[0], 400)
         self.assertEqual(self.request("/v1/accounts", "POST", None,
                                       {"login": "123456", "password": "x", "server": "Demo"})[0], 401)
+
+    def test_accounts_store_and_return_role_and_multiplier(self):
+        status, _ = self.provision(role="mentor", volume_multiplier=2.5)
+        self.assertEqual(status, 200)
+        status, body = self.request("/v1/accounts", token=BRIDGE_KEY)
+        self.assertEqual(status, 200)
+        account = json.loads(body)["accounts"][0]
+        self.assertEqual(account["role"], "mentor")
+        self.assertAlmostEqual(account["volume_multiplier"], 2.5)
+        self.assertEqual(account["mentor_id"], "")
+        # Invalid role and multiplier values are rejected.
+        self.assertEqual(self.provision(login="654321", role="admin")[0], 400)
+        self.assertEqual(self.provision(login="654321", volume_multiplier=0)[0], 400)
+        self.assertEqual(self.provision(login="654321", volume_multiplier=101)[0], 400)
+        self.assertEqual(self.provision(login="654321", volume_multiplier="x")[0], 400)
+        # Defaults are student / 1.
+        self.assertEqual(self.provision(login="654321")[0], 200)
+        status, body = self.request("/v1/accounts", token=BRIDGE_KEY)
+        accounts = {row["login"]: row for row in json.loads(body)["accounts"]}
+        self.assertEqual(accounts["654321"]["role"], "student")
+        self.assertAlmostEqual(accounts["654321"]["volume_multiplier"], 1)
+        # Re-provisioning without an explicit role keeps the stored role.
+        self.assertEqual(self.provision()[0], 200)
+        status, body = self.request("/v1/accounts", token=BRIDGE_KEY)
+        accounts = {row["login"]: row for row in json.loads(body)["accounts"]}
+        self.assertEqual(accounts["123456"]["role"], "mentor")
+
+    def test_mentor_register_with_password_creates_mentor_account(self):
+        with patch.object(bridge.tm, "ensure_terminal", return_value=(True, "launched")) as ensure:
+            status, body = self.request("/v1/mentors", "POST", BRIDGE_KEY, {
+                "mentor_id": "mentor-skud-01", "mentor_name": "SkudTurbo",
+                "login": "987654", "server": "OtherBroker-Demo", "password": "mentor-pass-1",
+            })
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertEqual(payload["terminal"], "launched")
+        ensure.assert_called_once()
+        account_arg = ensure.call_args[0][0]
+        self.assertEqual(account_arg["role"], "mentor")
+        self.assertEqual(account_arg["mentor_meta"],
+                         {"mentor_id": "mentor-skud-01", "mentor_name": "SkudTurbo"})
+        with bridge.db_session() as db:
+            row = db.execute(
+                "SELECT mentor_id,role,is_active,folder_path FROM accounts WHERE login='987654'"
+            ).fetchone()
+        self.assertEqual(row["mentor_id"], "mentor-skud-01")
+        self.assertEqual(row["role"], "mentor")
+        self.assertTrue(row["is_active"])
+        self.assertTrue(row["folder_path"])
+        # Registration without a password provisions no terminal.
+        with patch.object(bridge.tm, "ensure_terminal", return_value=(True, "launched")) as ensure2:
+            status, body = self.request("/v1/mentors", "POST", BRIDGE_KEY, {
+                "mentor_id": "mentor-two", "mentor_name": "Second",
+                "login": "555111", "server": "OtherBroker-Demo",
+            })
+        self.assertEqual(status, 200)
+        ensure2.assert_not_called()
+        self.assertNotIn("terminal", json.loads(body))
+        # Short passwords are rejected.
+        self.assertEqual(self.request("/v1/mentors", "POST", BRIDGE_KEY, {
+            "mentor_id": "mentor-three", "mentor_name": "Third",
+            "login": "555222", "server": "OtherBroker-Demo", "password": "12345",
+        })[0], 400)
+
+    def test_assign_unassign_mentor_endpoint(self):
+        self.provision(login="123456")
+        self.register_mentor()
+        self.assertEqual(self.request("/v1/accounts/999999/mentor", "POST", BRIDGE_KEY,
+                                      {"mentor_id": "mentor-skud-01"})[0], 404)
+        self.assertEqual(self.request("/v1/accounts/123456/mentor", "POST", BRIDGE_KEY,
+                                      {"mentor_id": "no-such-mentor"})[0], 404)
+        status, body = self.request("/v1/accounts/123456/mentor", "POST", BRIDGE_KEY,
+                                    {"mentor_id": "mentor-skud-01", "volume_multiplier": 2.5})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["mentor_id"], "mentor-skud-01")
+        with bridge.db_session() as db:
+            row = db.execute("SELECT mentor_id,volume_multiplier FROM accounts WHERE login='123456'").fetchone()
+        self.assertEqual(row["mentor_id"], "mentor-skud-01")
+        self.assertAlmostEqual(row["volume_multiplier"], 2.5)
+        # Empty mentor_id unassigns; the multiplier is left alone.
+        status, body = self.request("/v1/accounts/123456/mentor", "POST", BRIDGE_KEY, {"mentor_id": ""})
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["mentor_id"], "")
+        with bridge.db_session() as db:
+            row = db.execute("SELECT mentor_id,volume_multiplier FROM accounts WHERE login='123456'").fetchone()
+        self.assertEqual(row["mentor_id"], "")
+        self.assertAlmostEqual(row["volume_multiplier"], 2.5)
+        # Out-of-range multipliers are rejected.
+        self.assertEqual(self.request("/v1/accounts/123456/mentor", "POST", BRIDGE_KEY,
+                                      {"volume_multiplier": 0.001})[0], 400)
+        self.assertEqual(self.request("/v1/accounts/123456/mentor", "POST", BRIDGE_KEY,
+                                      {"volume_multiplier": 200})[0], 400)
+
+    def test_mentor_open_event_scales_follower_volumes(self):
+        self.register_mentor()
+        self.provision(login="111111", mentor_id="mentor-skud-01", volume_multiplier=2)
+        self.provision(login="222222", mentor_id="mentor-skud-01", volume_multiplier=0.35)
+        self.provision(login="333333", mentor_id="mentor-skud-01", volume_multiplier=100)
+        limits = {
+            "111111": {"volume_min": 0.01, "volume_max": 50, "volume_step": 0.01},
+            "222222": {"volume_min": 0.01, "volume_max": 50, "volume_step": 0.02},
+            "333333": {"volume_min": 0.01, "volume_max": 5, "volume_step": 0.01},
+        }
+        for login, limit in limits.items():
+            status, _ = self.request("/v1/prices", "POST", "test-ea-token",
+                                     {"login": login, "ticks": [{"symbol": "EURUSD", "bid": 1.1, "ask": 1.2,
+                                                                 **limit}]})
+            self.assertEqual(status, 200)
+        status, body = self.mentor_event()
+        self.assertEqual(status, 202)
+        self.assertEqual(json.loads(body)["queued"], 3)
+        with bridge.db_session() as db:
+            rows = db.execute("SELECT login,volume FROM orders WHERE status='queued'").fetchall()
+        volumes = {row["login"]: row["volume"] for row in rows}
+        self.assertEqual(len(volumes), 3)
+        # 0.1 * 2 within reported limits.
+        self.assertAlmostEqual(volumes["111111"], 0.2)
+        # 0.1 * 0.35 = 0.035, rounded down to the 0.02 step grid.
+        self.assertAlmostEqual(volumes["222222"], 0.03)
+        # 0.1 * 100 = 10 clamped to the reported volume_max of 5.
+        self.assertAlmostEqual(volumes["333333"], 5.0)
+
+    def test_mentor_open_event_scales_without_price_limits(self):
+        self.register_mentor()
+        self.provision(login="111111", mentor_id="mentor-skud-01", volume_multiplier=0.5)
+        status, body = self.mentor_event()
+        self.assertEqual(status, 202)
+        self.assertEqual(json.loads(body)["queued"], 1)
+        with bridge.db_session() as db:
+            row = db.execute("SELECT volume FROM orders WHERE status='queued'").fetchone()
+        self.assertAlmostEqual(row["volume"], 0.05)
+
+    def test_mentors_list_and_detail_shapes(self):
+        self.assertEqual(self.register_mentor()[0], 200)
+        self.provision(login="111111", mentor_id="mentor-skud-01")
+        self.request("/v1/terminal/status", "POST", "test-ea-token",
+                     {"login": "111111", "connected": True, "message": "MT5 login successful",
+                      "server": "DerivSVG-Server-02", "balance": 1000.5, "currency": "USD"})
+        self.assertEqual(self.mentor_event()[0], 202)
+        self.assertEqual(self.request("/v1/mentors")[0], 401)
+        status, body = self.request("/v1/mentors", token=BRIDGE_KEY)
+        self.assertEqual(status, 200)
+        mentors = json.loads(body)["mentors"]
+        self.assertEqual(len(mentors), 1)
+        self.assertEqual(mentors[0]["mentor_id"], "mentor-skud-01")
+        self.assertEqual(mentors[0]["active_followers"], 1)
+        self.assertNotIn("token_hash", mentors[0])
+        status, body = self.request("/v1/mentors/mentor-skud-01", token=BRIDGE_KEY)
+        self.assertEqual(status, 200)
+        payload = json.loads(body)
+        self.assertNotIn("token_hash", payload["mentor"])
+        self.assertEqual(payload["mentor"]["login"], "987654")
+        self.assertEqual(len(payload["followers"]), 1)
+        follower = payload["followers"][0]
+        self.assertEqual(follower["login"], "111111")
+        self.assertEqual(follower["role"], "student")
+        self.assertAlmostEqual(follower["volume_multiplier"], 1)
+        self.assertTrue(follower["connected"])
+        self.assertEqual(follower["balance"], 1000.5)
+        self.assertEqual(follower["currency"], "USD")
+        self.assertEqual(len(payload["events"]), 1)
+        self.assertEqual(payload["events"][0]["event_id"], "123456789")
+        self.assertEqual(payload["events"][0]["symbol"], "EURUSD")
+        self.assertEqual(self.request("/v1/mentors/no-such-mentor", token=BRIDGE_KEY)[0], 404)
+
+    def test_sync_chart_inputs_rewrites_mentor_chart_keys(self):
+        chart = Path(self.temp_dir.name) / "mentor-profile.chr"
+        chart.write_text(
+            "[Experts]\r\nMentorToken=old\r\nMentorId=old-id\r\nMentorName=old-name\r\nEaToken=keep\r\n",
+            encoding="utf-16",
+        )
+        with patch.object(bridge.tm, "MENTOR_EA_TOKEN", "mentor-token-1"):
+            bridge.tm.sync_chart_inputs(chart, {
+                "MentorToken": bridge.tm.MENTOR_EA_TOKEN,
+                "MentorId": "mentor-skud-01",
+                "MentorName": "SkudTurbo",
+            })
+        text = chart.read_text(encoding="utf-16")
+        self.assertIn("MentorToken=mentor-token-1", text)
+        self.assertIn("MentorId=mentor-skud-01", text)
+        self.assertIn("MentorName=SkudTurbo", text)
+        self.assertIn("EaToken=keep", text)
 
 
 if __name__ == "__main__":

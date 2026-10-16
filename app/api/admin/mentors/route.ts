@@ -1,71 +1,114 @@
-import { timingSafeEqual } from 'node:crypto'
+import { requireAdmin } from '@/lib/admin-guard'
 
 const MENTOR_ID_PATTERN = /^[A-Za-z0-9_-]{3,64}$/
 const LOGIN_PATTERN = /^\d{4,20}$/
 
-function constantTimeMatch(value: string, expected: string) {
-  const actualBytes = Buffer.from(value)
-  const expectedBytes = Buffer.from(expected)
-  return expectedBytes.length > 0 && actualBytes.length === expectedBytes.length &&
-    timingSafeEqual(actualBytes, expectedBytes)
+function jsonError(error: string, status: number) {
+  return Response.json({ error }, { status, headers: { 'Cache-Control': 'no-store' } })
+}
+
+function bridgeConfig() {
+  const bridgeUrl = process.env.SKUD_BRIDGE_URL
+  const bridgeKey = process.env.SKUD_BRIDGE_KEY
+  if (!bridgeUrl || !bridgeKey) return null
+  return { base: bridgeUrl.replace(/\/$/, ''), key: bridgeKey }
+}
+
+export async function GET(request: Request) {
+  const access = await requireAdmin(request)
+  if ('error' in access) return access.error
+
+  const config = bridgeConfig()
+  if (!config) return jsonError('MT5 bridge configuration is incomplete.', 503)
+
+  const url = new URL(request.url)
+  const id = url.searchParams.get('id')?.trim() ?? ''
+  const path = id ? `/v1/mentors/${encodeURIComponent(id)}` : '/v1/mentors'
+
+  let response: Response
+  try {
+    response = await fetch(`${config.base}${path}`, {
+      headers: { Authorization: `Bearer ${config.key}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10_000),
+    })
+  } catch {
+    return jsonError('Could not reach the MT5 bridge.', 502)
+  }
+
+  const body = await response.json().catch(() => null)
+  return Response.json(body ?? { error: 'Invalid response from the MT5 bridge.' }, {
+    status: response.status,
+    headers: { 'Cache-Control': 'no-store' },
+  })
 }
 
 export async function POST(request: Request) {
   const origin = request.headers.get('origin')
   if (origin && origin !== new URL(request.url).origin) {
-    return Response.json({ error: 'Invalid request origin.' }, { status: 403 })
+    return jsonError('Invalid request origin.', 403)
   }
+  const access = await requireAdmin(request)
+  if ('error' in access) return access.error
 
-  const setupCode = process.env.SKUD_MENTOR_SETUP_CODE ?? ''
-  const suppliedCode = request.headers.get('x-mentor-setup-code') ?? ''
-  if (!constantTimeMatch(suppliedCode, setupCode)) {
-    return Response.json({ error: 'Unauthorized.' }, { status: 401 })
-  }
+  const config = bridgeConfig()
+  if (!config) return jsonError('MT5 bridge configuration is incomplete.', 503)
 
-  const bridgeUrl = process.env.SKUD_BRIDGE_URL
-  const bridgeKey = process.env.SKUD_BRIDGE_KEY
-  if (!bridgeUrl || !bridgeKey) {
-    return Response.json({ error: 'MT5 bridge configuration is incomplete.' }, { status: 503 })
-  }
-
-  let payload: { mentorId?: unknown; mentorName?: unknown; login?: unknown; server?: unknown }
+  let payload: { mentorId?: unknown; mentorName?: unknown; login?: unknown; server?: unknown; password?: unknown }
   try {
     payload = await request.json()
   } catch {
-    return Response.json({ error: 'Invalid mentor details.' }, { status: 400 })
+    return jsonError('Invalid mentor details.', 400)
   }
 
   const mentorId = String(payload.mentorId ?? '').trim()
   const mentorName = String(payload.mentorName ?? '').trim()
   const login = String(payload.login ?? '').trim()
   const server = String(payload.server ?? '').trim()
+  const password = String(payload.password ?? '')
   if (!MENTOR_ID_PATTERN.test(mentorId) || !mentorName || mentorName.length > 80 ||
       !LOGIN_PATTERN.test(login) || !server || server.length > 128) {
-    return Response.json({ error: 'Enter a valid mentor ID, name, MT5 login, and server.' }, { status: 400 })
+    return jsonError('Enter a valid mentor ID, name, MT5 login, and server.', 400)
+  }
+  if (password && password.length < 6) {
+    return jsonError('The MT5 password must be at least 6 characters.', 400)
   }
 
   let response: Response
   try {
-    response = await fetch(`${bridgeUrl.replace(/\/$/, '')}/v1/mentors`, {
+    response = await fetch(`${config.base}/v1/mentors`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${bridgeKey}`,
+        Authorization: `Bearer ${config.key}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ mentor_id: mentorId, mentor_name: mentorName, login, server }),
+      body: JSON.stringify({
+        mentor_id: mentorId,
+        mentor_name: mentorName,
+        login,
+        server,
+        ...(password ? { password } : {}),
+      }),
       cache: 'no-store',
       signal: AbortSignal.timeout(10_000),
     })
   } catch {
-    return Response.json({ error: 'Could not reach the MT5 bridge.' }, { status: 502 })
+    return jsonError('Could not reach the MT5 bridge.', 502)
   }
 
-  const result = await response.json().catch(() => null) as { error?: string; mentor_token?: string } | null
+  const result = await response.json().catch(() => null) as
+    | { error?: string; mentor_token?: string; terminal?: string }
+    | null
   if (!response.ok || !result?.mentor_token) {
-    return Response.json({ error: result?.error ?? 'Could not register mentor.' }, { status: response.status || 502 })
+    return jsonError(result?.error ?? 'Could not register mentor.', response.status || 502)
   }
 
-  return Response.json({ mentorId, mentorName, login, server, mentorToken: result.mentor_token }, {
-    headers: { 'Cache-Control': 'no-store' },
-  })
+  return Response.json({
+    mentorId,
+    mentorName,
+    login,
+    server,
+    mentorToken: result.mentor_token,
+    terminal: result.terminal ?? '',
+  }, { headers: { 'Cache-Control': 'no-store' } })
 }

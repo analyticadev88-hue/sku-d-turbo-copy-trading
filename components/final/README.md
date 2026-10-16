@@ -2,10 +2,11 @@
 
 This deployment has three distinct parts:
 
-- **Mentor EA:** runs on the mentor's laptop and publishes that account's trade
-   events to the HTTPS bridge.
+- **Mentor EA:** runs on the mentor's laptop (or on a bridge-provisioned mentor
+   terminal on the VPS) and publishes that account's trade events to the HTTPS
+   bridge.
 - **Python bridge:** runs on the VPS, receives events, manages portable student
-   terminals, and queues events for each student account.
+   (and optionally mentor) terminals, and queues events for each student account.
 - **Student EA:** runs inside every VPS student terminal and executes queued
    events on that logged-in student account.
 
@@ -21,12 +22,45 @@ controlled VPS only.
 - Student portable terminals: `C:\skud\terminals\SlotNNN`
 - Bridge database: `C:\skud\final\data\skud.sqlite3`
 - Persistent DPAPI bridge key: `C:\ProgramData\SkuD\bridge-key.dpapi`
-- Public bridge URL: `https://skud.toporapula.dev`
+- Public bridge URL: `https://<SKUD_BRIDGE_HOST>` (default `skud.toporapula.dev`)
 - Website: `https://skudturbo.vercel.app`
 
 `start-bridge.ps1` and `start-all.ps1` use these paths by default. Optional
 `SKUD_TERMINAL_MASTER`, `SKUD_TERMINALS_DIR`, `SKUD_EA_SOURCE`, and
-`SKUD_CHART_TEMPLATE` environment variables override them.
+`SKUD_CHART_TEMPLATE` environment variables override them. Mentor-hosted
+terminals use three additional variables: `SKUD_MENTOR_EA_SOURCE` (compiled
+`SkuDTurboMentorEA.ex5`), `SKUD_MENTOR_CHART_TEMPLATE` (a chart profile with the
+Mentor EA attached), and `SKUD_MENTOR_EA_TOKEN` (the token written into that
+chart; defaults to `SKUD_BRIDGE_KEY` when unset).
+
+The public hostname is controlled by the `SKUD_BRIDGE_HOST` environment
+variable (Caddyfile; falls back to `skud.toporapula.dev`). The app never talks
+to an IP directly — it uses `SKUD_BRIDGE_URL` on Vercel — so moving servers is
+a DNS change, not a code change.
+
+## 0. Moving to a new VPS (or changing the bridge IP / hostname)
+
+The only things that tie this system to a server are the DNS A record and the
+files on the machine. To move (e.g. old VPS → new VPS):
+
+1. **New VPS**: upload this folder, then run
+   `powershell -ExecutionPolicy Bypass -File .\setup-new-vps.ps1 -BridgeHost <hostname>`.
+   It creates the layout, checks Python, downloads Caddy, opens firewall 80/443,
+   persists `SKUD_BRIDGE_HOST`, and prints a fresh **bridge key**.
+2. **DNS**: point the A record for `<hostname>` at the new VPS public IP
+   (or pick a new hostname for a new project — `setup-new-vps.ps1` takes any).
+   Wait for propagation.
+3. **Vercel**: set `SKUD_BRIDGE_URL=https://<hostname>` and `SKUD_BRIDGE_KEY`
+   to the new key; redeploy. Nothing else in the app changes.
+4. **EAs**: the new bridge has a new key — recompile `SkuDTurboStudentEA.mq5`
+   with the new `EaToken`, and re-register mentors (old tokens are hashed in
+   the old database and are invalid here). Optionally copy `data\skud.sqlite3`
+   from the old VPS to keep enrolled accounts.
+5. Follow sections 1-6 below for the MT5 master terminal, EA compile, and
+   mentor/student verification, then cut over by pointing DNS.
+
+For a completely fresh project on a different IP: same steps — the hostname
+and key are the only variables; the repo needs no edits.
 
 ## 1. Prepare the master MT5 terminal
 
@@ -81,10 +115,18 @@ provisioned student terminal. Each slot receives its own `startup.ini` with that
 password, and broker server. Do not add student credentials to the master
 profile.
 
+Chart profile convention: save the profile on the master terminal **once** with
+all Deriv charts the Student EA should report (the EA build 8.10 covers 30
+forex/metal symbols — all major EUR/GBP/USD/JPY/CHF/CAD/AUD/NZD crosses plus
+XAUUSD and XAGUSD; synthetics are excluded). Every cloned slot inherits that
+saved profile, and the bridge rewrites `EaToken` inside the copied `.chr` at
+launch, so the chart can never lock a terminal out with a stale token.
+
 ## 3. DNS, Caddy, and firewall
 
-The Caddyfile serves `skud.toporapula.dev` and proxies to
-`127.0.0.1:8765`. Its A record must point to `46.224.112.35`. Keep the existing
+The Caddyfile serves `{$SKUD_BRIDGE_HOST:skud.toporapula.dev}` and proxies to
+`127.0.0.1:8765`. Its A record must point at the VPS public IP (see section 0
+when moving servers). Keep the existing
 JoeMoney hostname `bridge.toporapula.dev` unchanged. Allow inbound TCP 80 and
 443 in Windows Firewall and the VPS provider firewall; do not expose port 8765.
 
@@ -168,6 +210,65 @@ Run bridge regression tests from this folder:
 python -m unittest discover -s . -p test_bridge.py -v
 ```
 
+## 7. Mentor-hosted terminal (optional)
+
+Instead of running the Mentor EA on the mentor's laptop, the bridge can host the
+mentor's MT5 account in its own provisioned terminal slot. Register (or update)
+the mentor with a trading password:
+
+```powershell
+Invoke-RestMethod -Method Post https://skud.toporapula.dev/v1/mentors `
+  -Headers @{ Authorization = "Bearer $key" } -ContentType "application/json" `
+  -Body (@{
+    mentor_id = "mentor-skud-01"; mentor_name = "SkudTurbo";
+    login = "987654"; server = "OtherBroker-Demo"; password = "<mt5 password>"
+  } | ConvertTo-Json)
+```
+
+When `password` is present (empty or 6-128 characters) the bridge:
+
+1. Claims a terminal slot (`SKUD_TERMINAL_MASTER` clone or a free slot, exactly
+   like student provisioning) and upserts an `accounts` row with
+   `role='mentor'` and `mentor_id` pointing at the mentor.
+2. Installs the Mentor EA (`SKUD_MENTOR_EA_SOURCE`) and the mentor chart
+   template (`SKUD_MENTOR_CHART_TEMPLATE`), rewriting `MentorToken=`
+   (`SKUD_MENTOR_EA_TOKEN`, falling back to `SKUD_BRIDGE_KEY`), `MentorId=`,
+   and `MentorName=` inside the copied `.chr` (UTF-16 aware, same as the
+   student `EaToken` rewrite).
+3. Launches the terminal with `startup.ini` auto-login and returns a
+   `terminal` field (`"launched"`, warnings, or `"failed: ..."`) in the JSON
+   response.
+
+The mentor then trades on that VPS terminal; the Mentor EA publishes events as
+usual and never copies to its own account (fan-out skips the source login).
+
+## 8. Copy scaling and account management
+
+Every follower account carries a `volume_multiplier` (0.01-100, default 1) and
+a `role` (`student`, default, or `mentor`). When a mentor open event fans out,
+each follower's order volume is `event volume x multiplier`, then clamped and
+step-rounded using the volume_min/volume_max/volume_step that follower's
+terminal last reported for the symbol (via `POST /v1/prices`); with no report
+the volume is clamped to [0.01, 100].
+
+Additional endpoints (all require the bridge key except where noted):
+
+- `GET /v1/accounts` — every account now also returns `mentor_id`,
+  `volume_multiplier`, and `role`.
+- `POST /v1/accounts` — accepts optional `role` and `volume_multiplier`.
+- `POST /v1/accounts/<login>/mentor` — body `{mentor_id, volume_multiplier?}`.
+  Assigns the account to a mentor (404 on unknown account or mentor) or clears
+  the assignment with `"mentor_id": ""`. `volume_multiplier` is updated only
+  when provided.
+- `GET /v1/mentors` — every mentor with an `active_followers` count, ordered by
+  creation time.
+- `GET /v1/mentors/<id>` — the mentor row (no `token_hash`), its follower list
+  (`login`, `server`, `is_active`, `volume_multiplier`, `role`, plus terminal
+  `connected`/`last_seen`/`balance`/`currency` via a LEFT JOIN on
+  `terminal_status`), and the latest 50 `trade_events`.
+- `GET /v1/prices?login=<login>` — price rows filtered to one account (exact
+  match, same row shape as the unfiltered list).
+
 ## Security and limitations
 
 - MT5 passwords are stored in plaintext in `data\skud.sqlite3` and slot
@@ -175,7 +276,11 @@ python -m unittest discover -s . -p test_bridge.py -v
   authentication, rate limiting, and access controls are implemented.
 - The bridge response means a command was accepted, not that a broker executed
   it. Confirm fills and account state in MT5.
-- Copy support currently covers market opens and full closes. Symbol mapping,
-  lot scaling, pending order changes, partial closes, and SL/TP modifications
-  are not implemented.
+- Copy support currently covers market opens and full closes, with per-follower
+  lot scaling (`volume_multiplier`, clamped to the broker's reported
+  volume_min/max/step). Symbol mapping, pending order changes, partial closes,
+  and SL/TP modifications are not implemented.
+- Student EA symbol coverage (build 8.10) is the full Deriv forex/metals list —
+  30 symbols from EURUSD through XAGUSD. Deriv synthetic indices are still
+  excluded from copy trading.
 - Do not share bridge keys, mentor tokens, or MT5 passwords.

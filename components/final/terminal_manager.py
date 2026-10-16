@@ -18,6 +18,9 @@ from pathlib import Path
 TERMINALS_DIR = Path(os.environ.get("SKUD_TERMINALS_DIR", r"C:\skud\terminals"))
 EA_SOURCE = os.environ.get("SKUD_EA_SOURCE", "")
 CHART_TEMPLATE = os.environ.get("SKUD_CHART_TEMPLATE", "")
+MENTOR_EA_SOURCE = os.environ.get("SKUD_MENTOR_EA_SOURCE", "")
+MENTOR_CHART_TEMPLATE = os.environ.get("SKUD_MENTOR_CHART_TEMPLATE", "")
+MENTOR_EA_TOKEN = os.environ.get("SKUD_MENTOR_EA_TOKEN", "") or os.environ.get("SKUD_BRIDGE_KEY", "")
 TERMINAL_MASTER = os.environ.get("SKUD_TERMINAL_MASTER", r"C:\skud\mt5-master")
 LAUNCH_STAGGER_SEC = float(os.environ.get("SKUD_LAUNCH_STAGGER_SEC", "5"))
 
@@ -149,20 +152,21 @@ def assign_slot(used_folders: set[str]) -> Path:
     return target
 
 
-def sync_chart_token(chart_path: Path) -> None:
-    """Force the EA token stored inside a chart profile to the configured key.
+def sync_chart_inputs(chart_path: Path, replacements: dict[str, str]) -> None:
+    """Rewrite KEY=value lines inside a chart profile, preserving its encoding.
 
-    Chart profiles persist the expert's input values, so a stale EaToken saved in
-    the template would override the EA's compiled default and every request from
-    that terminal would be rejected with 401 — regardless of which MT5 server the
-    account logs in to. Rewriting the line at launch makes the token independent
-    of the server and of whatever value was last saved in the chart.
+    Chart profiles persist the expert's input values, so a stale value saved in
+    the template would override the EA's compiled default — e.g. a stale EaToken
+    would get every request from that terminal rejected with 401 regardless of
+    which MT5 server the account logs in to. Rewriting the lines at launch makes
+    the inputs independent of the server and of whatever value was last saved in
+    the chart.
 
     MT5 writes .chr files as UTF-16, so the encoding must be detected before
-    editing; a plain text search would silently match nothing.
+    editing; a plain text search would silently match nothing. Only lines that
+    already exist are rewritten; missing keys are not added.
     """
-    token = os.environ.get("SKUD_EA_TOKEN") or os.environ.get("SKUD_BRIDGE_KEY") or ""
-    if not token or not chart_path.exists():
+    if not replacements or not chart_path.exists():
         return
     try:
         raw = chart_path.read_bytes()
@@ -180,14 +184,23 @@ def sync_chart_token(chart_path: Path) -> None:
         text = raw.decode(encoding)
     except (UnicodeDecodeError, ValueError):
         return
-    if "EaToken=" not in text:
+    if not any(key + "=" in text for key in replacements):
         return
-    updated = re.sub(r"(?m)^EaToken=.*$", "EaToken=" + token, text)
+    updated = text
+    for key, value in replacements.items():
+        updated = re.sub(r"(?m)^" + re.escape(key) + r"=.*$", key + "=" + value, updated)
     if updated != text:
         try:
             chart_path.write_bytes(updated.encode(encoding))
         except (OSError, UnicodeError):
             pass
+
+
+def sync_chart_token(chart_path: Path) -> None:
+    """Force the EA token stored inside a student chart profile to the configured key."""
+    token = os.environ.get("SKUD_EA_TOKEN") or os.environ.get("SKUD_BRIDGE_KEY") or ""
+    if token:
+        sync_chart_inputs(chart_path, {"EaToken": token})
 
 
 def ensure_terminal(account: dict) -> tuple[bool, str]:
@@ -202,6 +215,7 @@ def ensure_terminal(account: dict) -> tuple[bool, str]:
     exe = folder / "terminal64.exe"
     if not exe.exists():
         return False, f"terminal64.exe not found in {folder}"
+    role = str(account.get("role", "student") or "student")
     global _last_launch
     with _launch_lock:
         wait = LAUNCH_STAGGER_SEC - (time.time() - _last_launch)
@@ -218,21 +232,53 @@ def ensure_terminal(account: dict) -> tuple[bool, str]:
             f"[Common]\r\nLogin={login}\r\nPassword={account['password']}\r\nServer={account['server']}\r\n",
             encoding=startup_encoding,
         )
-        if EA_SOURCE and Path(EA_SOURCE).exists():
-            experts = folder / "MQL5" / "Experts"
-            experts.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(EA_SOURCE, experts / Path(EA_SOURCE).name)
+        if role == "mentor":
+            _install_mentor_files(folder, account, warnings)
         else:
-            warnings.append("EA source not configured; compile and copy the EA manually")
-        if CHART_TEMPLATE and Path(CHART_TEMPLATE).exists():
-            charts = folder / "MQL5" / "Profiles" / "Charts" / "Default"
-            charts.mkdir(parents=True, exist_ok=True)
-            target_chart = charts / Path(CHART_TEMPLATE).name
-            shutil.copy2(CHART_TEMPLATE, target_chart)
-            sync_chart_token(target_chart)
-        else:
-            warnings.append("chart template not configured; attach the SkuD Student EA to a chart manually")
+            _install_student_files(folder, warnings)
         subprocess.Popen([str(exe), "/portable", f"/config:{folder / 'startup.ini'}"], cwd=str(folder), close_fds=True)
         return True, "; ".join(warnings) if warnings else "launched"
     except Exception as exc:
         return False, str(exc)[:200]
+
+
+def _install_student_files(folder: Path, warnings: list[str]) -> None:
+    if EA_SOURCE and Path(EA_SOURCE).exists():
+        experts = folder / "MQL5" / "Experts"
+        experts.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(EA_SOURCE, experts / Path(EA_SOURCE).name)
+    else:
+        warnings.append("EA source not configured; compile and copy the EA manually")
+    if CHART_TEMPLATE and Path(CHART_TEMPLATE).exists():
+        charts = folder / "MQL5" / "Profiles" / "Charts" / "Default"
+        charts.mkdir(parents=True, exist_ok=True)
+        target_chart = charts / Path(CHART_TEMPLATE).name
+        shutil.copy2(CHART_TEMPLATE, target_chart)
+        sync_chart_token(target_chart)
+    else:
+        warnings.append("chart template not configured; attach the SkuD Student EA to a chart manually")
+
+
+def _install_mentor_files(folder: Path, account: dict, warnings: list[str]) -> None:
+    if MENTOR_EA_SOURCE and Path(MENTOR_EA_SOURCE).exists():
+        experts = folder / "MQL5" / "Experts"
+        experts.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(MENTOR_EA_SOURCE, experts / Path(MENTOR_EA_SOURCE).name)
+    else:
+        warnings.append("mentor EA source not configured; compile and copy the Mentor EA manually")
+    if MENTOR_CHART_TEMPLATE and Path(MENTOR_CHART_TEMPLATE).exists():
+        charts = folder / "MQL5" / "Profiles" / "Charts" / "Default"
+        charts.mkdir(parents=True, exist_ok=True)
+        target_chart = charts / Path(MENTOR_CHART_TEMPLATE).name
+        shutil.copy2(MENTOR_CHART_TEMPLATE, target_chart)
+        replacements: dict[str, str] = {"MentorToken": MENTOR_EA_TOKEN}
+        mentor_meta = account.get("mentor_meta") or {}
+        mentor_id = str(mentor_meta.get("mentor_id", "") or "")
+        mentor_name = str(mentor_meta.get("mentor_name", "") or "")
+        if mentor_id:
+            replacements["MentorId"] = mentor_id
+        if mentor_name:
+            replacements["MentorName"] = mentor_name
+        sync_chart_inputs(target_chart, replacements)
+    else:
+        warnings.append("mentor chart template not configured; attach the SkuD Mentor EA to a chart manually")

@@ -31,12 +31,14 @@ model User {
   email         String         @unique
   accessStatus  AccessStatus   @default(PENDING)
   isAdmin       Boolean        @default(false)
+  mentorId      String?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   subscriptions Subscription[]
   payments      PaymentOrder[]
 
   @@index([accessStatus, createdAt])
+  @@index([mentorId])
 }
 
 model Subscription {

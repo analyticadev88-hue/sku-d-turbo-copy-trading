@@ -175,6 +175,10 @@ def connect_db(path: Path | None = None) -> sqlite3.Connection:
     account_columns = {row[1] for row in connection.execute("PRAGMA table_info(accounts)")}
     if "mentor_id" not in account_columns:
         connection.execute("ALTER TABLE accounts ADD COLUMN mentor_id TEXT NOT NULL DEFAULT ''")
+    if "volume_multiplier" not in account_columns:
+        connection.execute("ALTER TABLE accounts ADD COLUMN volume_multiplier REAL NOT NULL DEFAULT 1")
+    if "role" not in account_columns:
+        connection.execute("ALTER TABLE accounts ADD COLUMN role TEXT NOT NULL DEFAULT 'student'")
     connection.execute(
         """CREATE TABLE IF NOT EXISTS mentors (
             mentor_id TEXT PRIMARY KEY,
@@ -273,6 +277,11 @@ def validate_account(payload: object) -> dict:
     password = str(payload.get("password", ""))
     server = str(payload.get("server", "")).strip()
     mentor_id = str(payload.get("mentor_id", "")).strip()
+    role = str(payload.get("role", "student") or "student").strip().lower()
+    try:
+        volume_multiplier = float(payload.get("volume_multiplier", 1))
+    except (TypeError, ValueError):
+        raise ValueError("volume_multiplier must be a number.") from None
     if not LOGIN_RE.fullmatch(login):
         raise ValueError("login must be 4-20 digits.")
     if not 1 <= len(password) <= 128:
@@ -281,7 +290,14 @@ def validate_account(payload: object) -> dict:
         raise ValueError("server must be 1-128 characters.")
     if mentor_id and not MENTOR_ID_RE.fullmatch(mentor_id):
         raise ValueError("mentor_id must contain 3-64 letters, digits, underscores, or hyphens.")
-    return {"login": login, "password": password, "server": server, "mentor_id": mentor_id}
+    if role not in {"student", "mentor"}:
+        raise ValueError("role must be student or mentor.")
+    if not math.isfinite(volume_multiplier) or not 0.01 <= volume_multiplier <= 100:
+        raise ValueError("volume_multiplier must be between 0.01 and 100.")
+    return {
+        "login": login, "password": password, "server": server, "mentor_id": mentor_id,
+        "role": role, "volume_multiplier": volume_multiplier,
+    }
 
 
 def validate_mentor(payload: object) -> dict:
@@ -291,6 +307,7 @@ def validate_mentor(payload: object) -> dict:
     mentor_name = str(payload.get("mentor_name", "")).strip()
     login = str(payload.get("login", "")).strip()
     server = str(payload.get("server", "")).strip()
+    password = str(payload.get("password", ""))
     if not MENTOR_ID_RE.fullmatch(mentor_id):
         raise ValueError("mentor_id must contain 3-64 letters, digits, underscores, or hyphens.")
     if not 1 <= len(mentor_name) <= 80 or any(char in mentor_name for char in "|\r\n"):
@@ -299,7 +316,12 @@ def validate_mentor(payload: object) -> dict:
         raise ValueError("login must be 4-20 digits.")
     if not 1 <= len(server) <= 128 or any(char in server for char in "|\r\n"):
         raise ValueError("server must contain 1-128 characters and cannot contain pipes.")
-    return {"mentor_id": mentor_id, "mentor_name": mentor_name, "login": login, "server": server}
+    if password and not 6 <= len(password) <= 128:
+        raise ValueError("password must be empty or 6-128 characters.")
+    return {
+        "mentor_id": mentor_id, "mentor_name": mentor_name, "login": login,
+        "server": server, "password": password,
+    }
 
 
 def validate_order(item: object) -> dict:
@@ -466,6 +488,26 @@ def validate_mentor_event(payload: object) -> dict:
     }
 
 
+def scale_follower_volume(db: sqlite3.Connection, follower: sqlite3.Row, symbol: str, event_volume: float) -> float:
+    """Scale a mentor trade by the follower's volume_multiplier and clamp it to
+    the broker volume limits that follower's terminal last reported (falling back
+    to a sane [0.01, 100] window), rounding to the symbol's volume step."""
+    scaled = event_volume * follower["volume_multiplier"]
+    limits = db.execute(
+        "SELECT volume_min,volume_max,volume_step FROM prices WHERE login=? AND symbol=?",
+        (follower["login"], symbol),
+    ).fetchone()
+    if limits:
+        volume_min, volume_max, volume_step = limits["volume_min"], limits["volume_max"], limits["volume_step"]
+        scaled = min(max(scaled, volume_min), volume_max)
+        if volume_step > 0:
+            scaled = volume_min + round((scaled - volume_min) / volume_step) * volume_step
+        scaled = min(max(scaled, volume_min), volume_max)
+    else:
+        scaled = min(max(scaled, 0.01), 100)
+    return round(scaled, 8)
+
+
 def reconcile_on_boot(force_refresh: bool = False) -> None:
     """Launch active accounts, optionally closing and refreshing managed terminals first."""
     if force_refresh:
@@ -513,6 +555,65 @@ class BridgeHandler(BaseHTTPRequestHandler):
         if length < 1 or length > 256_000:
             raise ValueError("Request body must be between 1 byte and 256 KB.")
         return json.loads(self.rfile.read(length))
+
+    def _provision_mentor_terminal(self, mentor: dict, now: float) -> str | None:
+        """Upsert the mentor's own MT5 account row and launch its terminal.
+
+        Mirrors the /v1/accounts upsert: reuse the existing slot when the login is
+        already registered, otherwise claim a free slot. Returns the terminal
+        result message ("launched", warnings, or "failed: ..."), or None when no
+        slot could be assigned.
+        """
+        with db_session() as db:
+            existing = db.execute("SELECT * FROM accounts WHERE login=?", (mentor["login"],)).fetchone()
+        if existing:
+            credentials_changed = (
+                existing["password"] != mentor["password"] or existing["server"] != mentor["server"]
+            )
+            if credentials_changed or not existing["is_active"]:
+                try:
+                    tm.stop_account_terminal(existing["folder_path"])
+                except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
+                    raise RuntimeError(
+                        f"Could not stop the previous MT5 terminal before updating credentials: {error}"
+                    ) from error
+            folder_path = existing["folder_path"]
+            with db_session() as db:
+                db.execute(
+                    "UPDATE accounts SET password=?,server=?,mentor_id=?,role='mentor',is_active=1,updated_at=? "
+                    "WHERE login=?",
+                    (mentor["password"], mentor["server"], mentor["mentor_id"], now, mentor["login"]),
+                )
+        else:
+            with db_session() as db:
+                used = {
+                    row[0] for row in db.execute(
+                        "SELECT folder_path FROM accounts WHERE folder_path IS NOT NULL AND folder_path != ''"
+                    )
+                }
+                try:
+                    slot = tm.assign_slot(used)
+                except RuntimeError:
+                    return None
+                folder_path = str(slot)
+                db.execute(
+                    "INSERT INTO accounts(login,password,server,folder_path,mentor_id,role,is_active,created_at,updated_at) "
+                    "VALUES(?,?,?,?,?,'mentor',1,?,?)",
+                    (mentor["login"], mentor["password"], mentor["server"], folder_path,
+                     mentor["mentor_id"], now, now),
+                )
+        try:
+            launched, message = tm.ensure_terminal({
+                "login": mentor["login"],
+                "password": mentor["password"],
+                "server": mentor["server"],
+                "folder_path": folder_path,
+                "role": "mentor",
+                "mentor_meta": {"mentor_id": mentor["mentor_id"], "mentor_name": mentor["mentor_name"]},
+            })
+        except Exception as exc:
+            return f"failed: {str(exc)[:200]}"
+        return message if launched else f"failed: {message}"
 
     def do_OPTIONS(self) -> None:
         self.send_response(204)
@@ -588,6 +689,9 @@ class BridgeHandler(BaseHTTPRequestHandler):
                         "server": row["server"],
                         "folder_path": row["folder_path"],
                         "is_active": bool(row["is_active"]),
+                        "mentor_id": row["mentor_id"],
+                        "volume_multiplier": row["volume_multiplier"],
+                        "role": row["role"],
                         "terminal_running": row["login"] in running,
                         "ea_connected": bool(
                             heartbeat and heartbeat["connected"] and now - heartbeat["last_seen"] < HEARTBEAT_STALE_SEC
@@ -596,6 +700,57 @@ class BridgeHandler(BaseHTTPRequestHandler):
                         "message": heartbeat["message"] if heartbeat else "Waiting for the SkuD EA heartbeat.",
                     })
             return self._send(200, {"accounts": accounts})
+        if parsed.path == "/v1/mentors":
+            if not client_authed(self.headers.get("Authorization", "")):
+                return self._send(401, {"error": "Unauthorized"})
+            with db_session() as db:
+                rows = db.execute(
+                    "SELECT mentor_id,mentor_name,login,server,is_active,created_at,updated_at "
+                    "FROM mentors ORDER BY created_at"
+                ).fetchall()
+                mentors = []
+                for row in rows:
+                    followers = db.execute(
+                        "SELECT COUNT(*) AS c FROM accounts WHERE mentor_id=? AND is_active=1",
+                        (row["mentor_id"],),
+                    ).fetchone()["c"]
+                    mentors.append({**dict(row), "is_active": bool(row["is_active"]),
+                                    "active_followers": followers})
+            return self._send(200, {"mentors": mentors})
+        match = re.fullmatch(r"/v1/mentors/([A-Za-z0-9_-]{3,64})", parsed.path)
+        if match:
+            if not client_authed(self.headers.get("Authorization", "")):
+                return self._send(401, {"error": "Unauthorized"})
+            mentor_id = match.group(1)
+            with db_session() as db:
+                mentor = db.execute(
+                    "SELECT mentor_id,mentor_name,login,server,is_active,created_at,updated_at "
+                    "FROM mentors WHERE mentor_id=?",
+                    (mentor_id,),
+                ).fetchone()
+                if not mentor:
+                    return self._send(404, {"error": "Unknown mentor."})
+                followers = db.execute(
+                    "SELECT a.login,a.server,a.is_active,a.volume_multiplier,a.role,"
+                    "ts.connected,ts.last_seen,ts.balance,ts.currency "
+                    "FROM accounts a LEFT JOIN terminal_status ts ON ts.login=a.login "
+                    "WHERE a.mentor_id=? ORDER BY a.created_at",
+                    (mentor_id,),
+                ).fetchall()
+                events = db.execute(
+                    "SELECT event_id,position_id,event_type,login,symbol,side,volume,created_at "
+                    "FROM trade_events WHERE mentor_id=? ORDER BY created_at DESC LIMIT 50",
+                    (mentor_id,),
+                ).fetchall()
+            return self._send(200, {
+                "mentor": {**dict(mentor), "is_active": bool(mentor["is_active"])},
+                "followers": [
+                    {**dict(row), "is_active": bool(row["is_active"]),
+                     "connected": bool(row["connected"] if row["connected"] is not None else 0)}
+                    for row in followers
+                ],
+                "events": [dict(row) for row in events],
+            })
         if parsed.path == "/v1/prices":
             if not client_authed(self.headers.get("Authorization", "")):
                 return self._send(401, {"error": "Unauthorized"})
@@ -745,14 +900,23 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 db.execute(
                     "INSERT INTO mentors(mentor_id,mentor_name,login,server,token_hash,is_active,created_at,updated_at) "
                     "VALUES(?,?,?,?,?,1,?,?) ON CONFLICT(mentor_id) DO UPDATE SET "
-                    "mentor_name=excluded.mentor_name,login=excluded.login,server=excluded.server," 
+                    "mentor_name=excluded.mentor_name,login=excluded.login,server=excluded.server,"
                     "token_hash=excluded.token_hash,is_active=1,updated_at=excluded.updated_at",
                     (mentor["mentor_id"], mentor["mentor_name"], mentor["login"], mentor["server"], token_hash, now, now),
                 )
-            return self._send(200, {
+            response = {
                 "mentor_id": mentor["mentor_id"], "mentor_name": mentor["mentor_name"],
                 "mentor_token": mentor_token,
-            })
+            }
+            if mentor["password"]:
+                try:
+                    terminal_message = self._provision_mentor_terminal(mentor, now)
+                except RuntimeError as error:
+                    return self._send(503, {"error": str(error)})
+                if terminal_message is None:
+                    return self._send(503, {"error": "No terminal slot available for the mentor account."})
+                response["terminal"] = terminal_message
+            return self._send(200, response)
         if parsed.path == "/v1/mentor/events":
             authorization = self.headers.get("Authorization", "")
             if not authorization.startswith("Bearer "):
@@ -805,16 +969,17 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 queued = 0
                 if event["event_type"] == "open":
                     followers = db.execute(
-                        "SELECT login FROM accounts WHERE mentor_id=? AND is_active=1 AND login!=?",
+                        "SELECT login,volume_multiplier FROM accounts WHERE mentor_id=? AND is_active=1 AND login!=?",
                         (event["mentor_id"], event["login"]),
                     ).fetchall()
                     for follower in followers:
+                        volume = scale_follower_volume(db, follower, event["symbol"], event["volume"])
                         db.execute(
                             "INSERT INTO orders(id,login,symbol,order_type,volume,entry_price,tp_enabled,tp_distance,"
                             "sl_enabled,sl_distance,status,mentor_id,mentor_name,source_event_id,source_position_id,created_at,updated_at) "
                             "VALUES(?,?,?,?,?,0,0,0,0,0,'queued',?,?,?,?,?,?)",
                             (str(uuid4()), follower["login"], event["symbol"],
-                             "MARKET_BUY" if event["side"] == "buy" else "MARKET_SELL", event["volume"],
+                             "MARKET_BUY" if event["side"] == "buy" else "MARKET_SELL", volume,
                              event["mentor_id"], mentor["mentor_name"], event["event_id"], event["position_id"], now, now),
                         )
                         queued += 1
@@ -841,7 +1006,11 @@ class BridgeHandler(BaseHTTPRequestHandler):
             if not client_authed(self.headers.get("Authorization", "")):
                 return self._send(401, {"error": "Unauthorized"})
             try:
-                account = validate_account(self._read_json())
+                payload = self._read_json()
+                if not isinstance(payload, dict):
+                    raise ValueError("Account must be an object.")
+                role_provided = bool(str(payload.get("role", "")).strip())
+                account = validate_account(payload)
             except (json.JSONDecodeError, ValueError, AttributeError) as error:
                 return self._send(400, {"error": str(error)})
             now = time.time()
@@ -858,11 +1027,16 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
                         return self._send(503, {"error": f"Could not stop the previous MT5 terminal before updating credentials: {error}"})
                 folder_path = existing["folder_path"]
+                # role keeps the existing value unless the request sets it explicitly,
+                # so re-provisioning a mentor's login as a plain account never demotes it.
+                role_value = account["role"] if role_provided else ""
                 with db_session() as db:
                     db.execute(
                         "UPDATE accounts SET password=?,server=?,mentor_id=CASE WHEN ?='' THEN mentor_id ELSE ? END,"
+                        "role=CASE WHEN ?='' THEN role ELSE ? END,volume_multiplier=?,"
                         "is_active=1,updated_at=? WHERE login=?",
-                        (account["password"], account["server"], account["mentor_id"], account["mentor_id"], now, account["login"]),
+                        (account["password"], account["server"], account["mentor_id"], account["mentor_id"],
+                         role_value, role_value, account["volume_multiplier"], now, account["login"]),
                     )
             else:
                 with db_session() as db:
@@ -877,16 +1051,17 @@ class BridgeHandler(BaseHTTPRequestHandler):
                         return self._send(503, {"error": str(error)})
                     folder_path = str(slot)
                     db.execute(
-                        "INSERT INTO accounts(login,password,server,folder_path,mentor_id,is_active,created_at,updated_at) "
-                        "VALUES(?,?,?,?,?,1,?,?)",
+                        "INSERT INTO accounts(login,password,server,folder_path,mentor_id,role,volume_multiplier,is_active,created_at,updated_at) "
+                        "VALUES(?,?,?,?,?,?,?,1,?,?)",
                         (account["login"], account["password"], account["server"], folder_path,
-                         account["mentor_id"], now, now),
+                         account["mentor_id"], account["role"], account["volume_multiplier"], now, now),
                     )
             launched, message = tm.ensure_terminal({
                 "login": account["login"],
                 "password": account["password"],
                 "server": account["server"],
                 "folder_path": folder_path,
+                "role": account["role"],
             })
             return self._send(200, {
                 "login": account["login"],
@@ -914,6 +1089,49 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     (time.time(), match.group(1)),
                 )
             return self._send(200, {"status": "deactivated", "login": match.group(1), "terminal_stopped": True})
+        match = re.fullmatch(r"/v1/accounts/(\d{4,20})/mentor", parsed.path)
+        if match:
+            if not client_authed(self.headers.get("Authorization", "")):
+                return self._send(401, {"error": "Unauthorized"})
+            login = match.group(1)
+            try:
+                payload = self._read_json()
+                if not isinstance(payload, dict):
+                    raise ValueError("Request body must be an object.")
+                mentor_id = str(payload.get("mentor_id", "")).strip()
+                if mentor_id and not MENTOR_ID_RE.fullmatch(mentor_id):
+                    raise ValueError("mentor_id must contain 3-64 letters, digits, underscores, or hyphens.")
+                multiplier = None
+                if payload.get("volume_multiplier") is not None:
+                    try:
+                        multiplier = float(payload.get("volume_multiplier"))
+                    except (TypeError, ValueError):
+                        raise ValueError("volume_multiplier must be a number.") from None
+                    if not math.isfinite(multiplier) or not 0.01 <= multiplier <= 100:
+                        raise ValueError("volume_multiplier must be between 0.01 and 100.")
+            except (json.JSONDecodeError, ValueError, AttributeError) as error:
+                return self._send(400, {"error": str(error)})
+            with db_session() as db:
+                account = db.execute("SELECT login FROM accounts WHERE login=?", (login,)).fetchone()
+                if not account:
+                    return self._send(404, {"error": "Unknown account."})
+                if mentor_id and not db.execute(
+                    "SELECT 1 FROM mentors WHERE mentor_id=?", (mentor_id,)
+                ).fetchone():
+                    return self._send(404, {"error": "Unknown mentor."})
+                if multiplier is not None:
+                    db.execute(
+                        "UPDATE accounts SET mentor_id=?,volume_multiplier=?,updated_at=? WHERE login=?",
+                        (mentor_id, multiplier, time.time(), login),
+                    )
+                else:
+                    db.execute(
+                        "UPDATE accounts SET mentor_id=?,updated_at=? WHERE login=?",
+                        (mentor_id, time.time(), login),
+                    )
+            return self._send(200, {
+                "login": login, "mentor_id": mentor_id, "volume_multiplier": multiplier,
+            })
         if parsed.path == "/v1/orders":
             if not client_authed(self.headers.get("Authorization", "")):
                 return self._send(401, {"error": "Unauthorized"})

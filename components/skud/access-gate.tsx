@@ -7,6 +7,7 @@ import { AccessStart } from './access-start'
 import { AdminApp } from './admin-app'
 import { Dashboard } from './dashboard'
 import { GetStarted } from './get-started'
+import { MentorApp } from './mentor-app'
 import { loadStoredAccount, type StoredMt5Account } from './mt5-session'
 import { getBrowserSupabase } from '@/lib/supabase'
 
@@ -28,6 +29,7 @@ type AccessState = 'pending' | 'approved' | 'rejected' | 'expired' | 'payment_re
 export function AccessGate({ preview, checkout, login }: { preview: boolean; checkout?: string; login?: boolean }) {
   const [access, setAccess] = useState<AccessState | null | undefined>(undefined)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [mentorId, setMentorId] = useState<string | null>(null)
   const [orderId, setOrderId] = useState<string | undefined>()
   const [stored, setStored] = useState<StoredMt5Account | null>(null)
 
@@ -54,11 +56,12 @@ export function AccessGate({ preview, checkout, login }: { preview: boolean; che
           headers: { Authorization: `Bearer ${token}` },
           cache: 'no-store',
         })
-        const result = await response.json() as { status?: AccessState; isAdmin?: boolean; error?: string }
+        const result = await response.json() as { status?: AccessState; isAdmin?: boolean; mentorId?: string | null; error?: string }
         if (!response.ok) throw new Error(result.error ?? 'Could not verify subscription access.')
         if (!active) return
         setAccess(result.status ?? 'error')
         setIsAdmin(result.isAdmin === true)
+        setMentorId(typeof result.mentorId === 'string' && result.mentorId ? result.mentorId : null)
         if (result.status === 'approved') setStored(loadStoredAccount())
       } catch {
         if (active) setAccess('error')
@@ -74,6 +77,8 @@ export function AccessGate({ preview, checkout, login }: { preview: boolean; che
   if (access === undefined) return <AccessSplash />
 
   if (isAdmin) return <AdminApp />
+
+  if (mentorId) return <MentorApp mentorId={mentorId} />
 
   if (access === 'error') {
     return (

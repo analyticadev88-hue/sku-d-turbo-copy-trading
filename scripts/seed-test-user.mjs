@@ -10,6 +10,7 @@ import { PrismaClient } from '@prisma/client'
 
 const TEST_USER = { email: 'testing@gmail.com', password: 'testing', admin: false }
 const ADMIN_USER = { email: 'skudmasima@test.com', password: 'masima123', admin: true }
+const MENTOR_USER = { email: 'skudmentor@test.com', password: 'mentor123', mentorId: 'mentor-skud-01' }
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -101,12 +102,25 @@ async function seedAdminUser() {
   console.log('Admin flag set in database (no subscription required).')
 }
 
+async function seedMentorUser() {
+  const authUserId = await upsertAuthUser(MENTOR_USER)
+
+  await prisma.user.upsert({
+    where: { id: authUserId },
+    create: { id: authUserId, email: MENTOR_USER.email, mentorId: MENTOR_USER.mentorId },
+    update: { email: MENTOR_USER.email, mentorId: MENTOR_USER.mentorId },
+  })
+  console.log(`Mentor portal user linked to bridge mentor '${MENTOR_USER.mentorId}'.`)
+}
+
 try {
   await seedTestUser()
   await seedAdminUser()
+  await seedMentorUser()
   console.log(`\nDone.`)
   console.log(`  Test user: ${TEST_USER.email} / ${TEST_USER.password}`)
   console.log(`  Admin:     ${ADMIN_USER.email} / ${ADMIN_USER.password}`)
+  console.log(`  Mentor:    ${MENTOR_USER.email} / ${MENTOR_USER.password}`)
 } catch (error) {
   console.error(error instanceof Error ? error.message : error)
   process.exitCode = 1
