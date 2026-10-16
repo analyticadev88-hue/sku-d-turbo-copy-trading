@@ -3,11 +3,10 @@ import type { MetadataRoute } from 'next'
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: '/',
-    name: 'SkuD Turbo — Forex Trading Robot',
-    short_name: 'SkuD Turbo',
-    description:
-      'The high-performance forex trading robot by Skud. Connect your Deriv MT5 account and copy his strategy automatically.',
-    start_url: '/',
+    name: 'Synthyard EA Hosting',
+    short_name: 'Synthyard',
+    description: 'Managed Expert Advisor hosting and trading account access.',
+    start_url: '/dashboard',
     scope: '/',
     display: 'standalone',
     orientation: 'portrait',

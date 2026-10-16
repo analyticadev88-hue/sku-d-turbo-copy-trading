@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { getBrowserSupabase } from '@/lib/supabase'
 import { saveStoredAccount } from './mt5-session'
 import { DerivMark } from './deriv-logo'
 
@@ -44,9 +45,15 @@ export function CheckoutReturn() {
     setFormMessage('Submitting account to the MT5 bridge...')
 
     try {
+      const { data: sessionData } = await getBrowserSupabase().auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) throw new Error('Sign in to your approved account before connecting MT5.')
       const response = await fetch('/api/mt5/accounts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-supabase-access-token': accessToken,
+        },
         body: JSON.stringify({ login, password, server }),
       })
       const result = await response.json() as {

@@ -5,7 +5,6 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { ArrowRight, Check, MapPin, X } from 'lucide-react'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
-import { DerivMark } from './deriv-logo'
 
 export function AccessStart() {
   const [open, setOpen] = useState(false)
@@ -18,11 +17,12 @@ export function AccessStart() {
 
     try {
       const response = await fetch('/api/payments/create', { method: 'POST' })
-      const result = (await response.json()) as { invoiceUrl?: string; error?: string }
+      const result = (await response.json()) as { invoiceUrl?: string; orderId?: string; error?: string }
       if (!response.ok || !result.invoiceUrl) {
         throw new Error(result.error ?? 'Could not start checkout. Please try again.')
       }
 
+      if (result.orderId) window.localStorage.setItem('skud-payment-order', result.orderId)
       window.location.assign(result.invoiceUrl)
     } catch (error) {
       setCheckoutError(
@@ -33,37 +33,22 @@ export function AccessStart() {
   }
 
   return (
-    <main className="relative isolate flex min-h-dvh flex-col overflow-hidden bg-background">
-      <Image
-        src="/images/skud-hero.jpg"
-        alt="Skud, founder of SkuD Turbo"
-        fill
-        priority
-        sizes="100vw"
-        className="-z-20 object-cover object-[50%_24%]"
-      />
-      <div
-        className="absolute inset-0 -z-10 bg-[linear-gradient(90deg,rgba(8,8,10,0.94)_0%,rgba(8,8,10,0.72)_48%,rgba(8,8,10,0.25)_100%)]"
-        aria-hidden="true"
-      />
-      <div
-        className="absolute inset-0 -z-10 bg-[linear-gradient(0deg,#0b0b0d_0%,transparent_40%,rgba(11,11,13,0.18)_100%)]"
-        aria-hidden="true"
-      />
+    <main className="relative isolate flex min-h-dvh flex-col overflow-hidden bg-[#0b0b0d] text-white [--primary:#e4e4e7] [--primary-foreground:#09090b]">
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_75%_20%,rgba(255,255,255,0.08),transparent_45%)]" aria-hidden="true" />
 
       <header className="mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-5 sm:px-8 sm:py-7">
-        <Link href="/" aria-label="SkuD Turbo home" className="inline-flex items-center gap-3">
-          <DerivMark className="size-10 rounded-xl text-xl" />
-          <span className="flex flex-col gap-0.5">
-            <span className="text-sm font-extrabold lowercase leading-none text-white">deriv</span>
+        <Link href="/" aria-label="Synthyard EA Hosting home" className="inline-flex items-center gap-3">
+          <Image src="/logo-synth.webp" alt="" width={44} height={44} className="size-10 rounded-xl object-cover" />
+          <span className="flex flex-col gap-1">
+            <span className="text-sm font-extrabold uppercase leading-none text-white">Synthyard</span>
             <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/65">
-              SkuD Turbo
+              EA Hosting
             </span>
           </span>
         </Link>
         <Link
           href="/"
-          className="text-xs font-bold uppercase tracking-[0.18em] text-white/75 transition-colors hover:text-white"
+          className="text-xs font-bold uppercase tracking-[0.18em] text-white/65 transition-colors hover:text-white"
         >
           Back to home
         </Link>
@@ -71,18 +56,17 @@ export function AccessStart() {
 
       <section className="mx-auto flex w-full max-w-7xl flex-1 items-end px-5 pb-16 pt-20 sm:px-8 sm:pb-24 lg:items-center lg:pb-28">
         <div className="max-w-2xl animate-in fade-in slide-in-from-bottom-3 duration-700">
-          <p className="mb-5 flex items-center gap-3 text-[11px] font-extrabold uppercase tracking-[0.28em] text-primary-foreground">
+          <p className="mb-5 flex items-center gap-3 text-[11px] font-extrabold uppercase tracking-[0.28em] text-white/80">
             <span className="h-px w-8 bg-primary" />
-            Automated forex access
+            Dedicated trading infrastructure
           </p>
           <h1 className="max-w-xl text-balance text-5xl font-extrabold uppercase leading-[0.92] text-white sm:text-7xl">
             Your next move.
             <br />
-            <span className="text-primary">Made automatic.</span>
+            <span className="text-white">Made automatic.</span>
           </h1>
           <p className="mt-6 max-w-lg text-pretty text-base leading-relaxed text-white/75 sm:text-lg">
-            Get SkuD Turbo set up with a dedicated Deriv MT5 account and server, ready for copy
-            trading.
+            Get your Expert Advisor hosted on a dedicated MT5 server with managed setup and hosting.
           </p>
           <button
             type="button"
@@ -90,7 +74,7 @@ export function AccessStart() {
               setCheckoutError(null)
               setOpen(true)
             }}
-            className="mt-9 inline-flex min-h-14 items-center gap-8 rounded-md bg-primary px-6 text-sm font-extrabold uppercase tracking-[0.12em] text-white transition-colors hover:bg-primary/85 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+            className="mt-9 inline-flex min-h-14 items-center gap-8 rounded-md bg-primary px-6 text-sm font-extrabold uppercase tracking-[0.12em] text-primary-foreground transition-colors hover:bg-primary/85 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
           >
             Get access
             <ArrowRight className="size-4" aria-hidden="true" />
@@ -99,8 +83,8 @@ export function AccessStart() {
       </section>
 
       <footer className="mx-auto flex w-full max-w-7xl items-center justify-between px-5 pb-5 text-[10px] font-bold uppercase tracking-[0.16em] text-white/45 sm:px-8">
-        <span>© SkuD Turbo</span>
-        <span>Powered by Deriv</span>
+        <span>© Synthyard EA Hosting</span>
+        <Link href="/dashboard?login=1" className="transition-colors hover:text-white">Approved user? Sign in</Link>
       </footer>
 
       <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
@@ -111,13 +95,13 @@ export function AccessStart() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-primary">
-                  One-time setup
+                  Synthyard EA Hosting
                 </p>
                 <DialogPrimitive.Title className="mt-2 text-2xl font-extrabold leading-tight sm:text-3xl">
-                  Get your access
+                  Get hosting access
                 </DialogPrimitive.Title>
                 <DialogPrimitive.Description className="mt-2 max-w-lg text-sm leading-relaxed text-white/60">
-                  Your setup fee initiates creation of a dedicated MT5 account and server access.
+                  The one-time setup fee starts preparation of your dedicated MT5 EA hosting and server access.
                 </DialogPrimitive.Description>
               </div>
               <DialogPrimitive.Close
@@ -135,26 +119,26 @@ export function AccessStart() {
               />
               <div className="relative flex items-start justify-between gap-4">
                 <div className="flex items-center gap-3">
-                  <DerivMark className="size-10 rounded-xl text-xl" />
+                  <Image src="/logo-synth.webp" alt="" width={40} height={40} className="size-10 rounded-xl object-cover" />
                   <div>
-                    <p className="text-sm font-extrabold lowercase">deriv</p>
+                    <p className="text-sm font-extrabold uppercase">Synthyard</p>
                     <p className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.2em] text-white/45">
-                      Account setup
+                      EA hosting
                     </p>
                   </div>
                 </div>
                 <span className="rounded-sm border border-white/15 px-2 py-1 text-[9px] font-extrabold uppercase tracking-[0.14em] text-white/65">
-                  SkuD Turbo
+                  Dedicated MT5
                 </span>
               </div>
               <div className="relative mt-9 flex items-end justify-between gap-3">
                 <div>
                   <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-white/45">
-                    MT5 app + server access
+                    MT5 EA hosting + server access
                   </p>
                   <p className="mt-1 text-3xl font-extrabold tracking-tight">$13</p>
                 </div>
-                <div className="flex h-8 items-center gap-1.5 pb-1" aria-label="Card payment">
+                <div className="flex h-8 items-center gap-1.5 pb-1" aria-label="Secure payment">
                   <span className="size-5 rounded-full bg-primary" />
                   <span className="-ml-2 size-5 rounded-full bg-white/75" />
                 </div>
@@ -192,9 +176,9 @@ export function AccessStart() {
               type="button"
               onClick={startCheckout}
               disabled={isStartingCheckout}
-              className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-primary px-5 text-sm font-extrabold text-white transition-colors hover:bg-primary/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-wait disabled:opacity-70"
+              className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-primary px-5 text-sm font-extrabold text-primary-foreground transition-colors hover:bg-primary/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-wait disabled:opacity-70"
             >
-              {isStartingCheckout ? 'Preparing test checkout...' : 'Proceed to pay $13'}
+              {isStartingCheckout ? 'Preparing secure checkout...' : 'Continue to hosting payment — $13'}
               {!isStartingCheckout && <ArrowRight className="size-4" aria-hidden="true" />}
             </button>
             {checkoutError ? (
@@ -204,7 +188,7 @@ export function AccessStart() {
             ) : (
               <p className="mt-3 flex items-center justify-center gap-1.5 text-center text-[11px] leading-relaxed text-white/45">
                 <Check className="size-3.5 text-success" aria-hidden="true" />
-                Test mode is enabled. Account setup is not initiated by this payment test.
+                Secure checkout is provided by NOWPayments. Account setup continues after payment confirmation and mentor approval.
               </p>
             )}
           </DialogPrimitive.Popup>

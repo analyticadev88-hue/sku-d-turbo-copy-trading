@@ -1,0 +1,64 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum AccessStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+}
+
+model User {
+  id            String         @id @db.Uuid
+  email         String         @unique
+  accessStatus  AccessStatus   @default(PENDING)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  subscriptions Subscription[]
+  payments      PaymentOrder[]
+
+  @@index([accessStatus, createdAt])
+}
+
+model Subscription {
+  id             String             @id @default(cuid())
+  userId         String             @db.Uuid
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status         SubscriptionStatus @default(ACTIVE)
+  durationMonths Int
+  startsAt       DateTime
+  expiresAt      DateTime
+  mentorName     String
+  createdAt      DateTime           @default(now())
+
+  @@index([userId, status, expiresAt])
+}
+
+model PaymentOrder {
+  id        String        @id
+  status    PaymentStatus @default(PENDING)
+  userId    String?       @db.Uuid
+  user      User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@index([userId, status])
+}

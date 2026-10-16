@@ -8,14 +8,15 @@ export const metadata: Metadata = {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ checkout?: string | string[]; preview?: string | string[] }>
+  searchParams: Promise<{ checkout?: string | string[]; preview?: string | string[]; login?: string | string[] }>
 }) {
-  const { checkout, preview } = await searchParams
+  const { checkout, preview, login } = await searchParams
 
   return (
     <AccessGate
       preview={preview === '1'}
       checkout={typeof checkout === 'string' ? checkout : undefined}
+      login={login === '1'}
     />
   )
 }

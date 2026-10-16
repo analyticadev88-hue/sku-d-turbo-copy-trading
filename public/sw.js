@@ -1,9 +1,9 @@
-const CACHE = 'skud-turbo-v1'
+const CACHE = 'skud-turbo-v2'
 const PRECACHE = [
   '/',
-  '/dashboard',
   '/offline.html',
   '/images/skud-hero.jpg',
+  '/logo-synth.webp',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
 ]
@@ -28,6 +28,13 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
+
+  if (url.pathname.startsWith('/dashboard') || url.pathname.startsWith('/api/')) {
+    if (request.mode === 'navigate') {
+      event.respondWith(fetch(request).catch(() => caches.match('/offline.html')))
+    }
+    return
+  }
 
   // Pages: network first so trading data stays fresh, fall back to cache/offline.
   if (request.mode === 'navigate') {

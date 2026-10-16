@@ -65,12 +65,12 @@ export function PwaProvider() {
   return (
     <div
       role="dialog"
-      aria-label="Install SkuD Turbo"
+      aria-label="Install Synthyard EA Hosting"
       className="fixed inset-x-3 bottom-3 z-50 mx-auto flex max-w-md items-center gap-3 rounded-2xl border border-border bg-card p-3 shadow-2xl animate-in slide-in-from-bottom-4 fade-in"
     >
-      <img src="/icons/icon-192.png" alt="" className="size-12 shrink-0 rounded-xl" />
+      <img src="/logo-synth.webp" alt="" className="size-12 shrink-0 rounded-xl object-cover" />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-bold text-foreground">Install SkuD Turbo</p>
+        <p className="text-sm font-bold text-foreground">Install Synthyard EA Hosting</p>
         {showIos && !deferred ? (
           <p className="text-xs leading-relaxed text-muted-foreground">
             Tap <Share className="inline size-3.5 align-[-2px]" aria-label="Share" /> then{' '}
@@ -78,7 +78,7 @@ export function PwaProvider() {
           </p>
         ) : (
           <p className="text-xs leading-relaxed text-muted-foreground">
-            Full-screen app with one-tap access to your robot.
+            Full-screen access to your hosted trading service.
           </p>
         )}
       </div>
@@ -86,7 +86,7 @@ export function PwaProvider() {
         <button
           type="button"
           onClick={install}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-sm font-bold text-primary-foreground transition-opacity hover:opacity-90"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#e4e4e7] px-4 py-2 text-sm font-bold text-[#09090b] transition-opacity hover:opacity-90"
         >
           <Download className="size-4" aria-hidden="true" />
           Install

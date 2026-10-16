@@ -11,6 +11,7 @@ import {
   LogOut,
   UserRound,
 } from 'lucide-react'
+import { getBrowserSupabase } from '@/lib/supabase'
 import {
   Dialog,
   DialogContent,
@@ -76,8 +77,14 @@ export function Dashboard({ preview = false }: DashboardProps) {
 
     async function refreshStatus() {
       try {
+        const { data: sessionData } = await getBrowserSupabase().auth.getSession()
+        const accessToken = sessionData.session?.access_token
+        if (!accessToken) throw new Error('Your SkuD Turbo session has expired. Sign in again.')
         const response = await fetch(`/api/mt5/status?login=${encodeURIComponent(account.login)}`, {
-          headers: { Authorization: `Bearer ${account.statusToken}` },
+          headers: {
+            Authorization: `Bearer ${account.statusToken}`,
+            'x-supabase-access-token': accessToken,
+          },
           cache: 'no-store',
         })
         const result = await response.json() as Mt5Status & { error?: string }
@@ -105,9 +112,14 @@ export function Dashboard({ preview = false }: DashboardProps) {
     const account = liveAccount
     if (account) {
       try {
+        const { data: sessionData } = await getBrowserSupabase().auth.getSession()
+        const accessToken = sessionData.session?.access_token
         await fetch(`/api/mt5/accounts/${encodeURIComponent(account.login)}/disconnect`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${account.statusToken}` },
+          headers: {
+            Authorization: `Bearer ${account.statusToken}`,
+            ...(accessToken ? { 'x-supabase-access-token': accessToken } : {}),
+          },
         })
       } catch {
         // Even if the bridge is unreachable, still end the local session.
@@ -118,6 +130,12 @@ export function Dashboard({ preview = false }: DashboardProps) {
     setLiveAccount(null)
     setLiveStatus(null)
     setTab('home')
+  }
+
+  async function signOutOfApp() {
+    await signOut()
+    await getBrowserSupabase().auth.signOut()
+    window.location.assign('/dashboard?login=1')
   }
 
   async function submitAccount(event: FormEvent<HTMLFormElement>) {
@@ -139,9 +157,15 @@ export function Dashboard({ preview = false }: DashboardProps) {
     setFormMessage('Connecting your MT5 account...')
 
     try {
+      const { data: sessionData } = await getBrowserSupabase().auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) throw new Error('Sign in to your approved account before connecting MT5.')
       const response = await fetch('/api/mt5/accounts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-supabase-access-token': accessToken,
+        },
         body: JSON.stringify({ login, password, server }),
       })
 
@@ -202,7 +226,7 @@ export function Dashboard({ preview = false }: DashboardProps) {
           onAccountDetails={() => setAccountSheetOpen(true)}
         />
       ) : (
-        <ProfileView preview={preview} mentorId={mentorId} onSignOut={signOut} />
+        <ProfileView preview={preview} mentorId={mentorId} onSignOut={signOutOfApp} />
       )}
 
       <nav

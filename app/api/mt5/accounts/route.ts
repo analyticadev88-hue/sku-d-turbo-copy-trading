@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto'
+import { requireApprovedUser } from '@/lib/access-control'
 
 const DERIV_SERVERS = [
   'Deriv-Demo',
@@ -21,6 +22,8 @@ export async function POST(request: Request) {
   if (origin && origin !== new URL(request.url).origin) {
     return jsonError('Invalid request origin.', 403)
   }
+  const access = await requireApprovedUser(request)
+  if ('error' in access) return access.error
   if (process.env.SKUD_ALLOW_DEMO_STUDENT_ENROLLMENT !== 'true') {
     return jsonError('Student enrollment is disabled on this deployment.', 503)
   }

@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import { requireApprovedUser } from '@/lib/access-control'
 
 function tokenMatches(login: string, token: string, bridgeKey: string) {
   const [expiresText, signature, extra] = token.split('.')
@@ -22,6 +23,8 @@ export async function POST(
   if (origin && origin !== new URL(request.url).origin) {
     return Response.json({ error: 'Invalid request origin.' }, { status: 403 })
   }
+  const access = await requireApprovedUser(request)
+  if ('error' in access) return access.error
 
   const bridgeUrl = process.env.SKUD_BRIDGE_URL
   const bridgeKey = process.env.SKUD_BRIDGE_KEY

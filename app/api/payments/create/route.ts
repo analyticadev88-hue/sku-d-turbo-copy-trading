@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
+import { prisma } from '@/lib/prisma'
+import { SETUP_PRICE_AMOUNT, SETUP_PRICE_CURRENCY } from '@/lib/payment-config'
 
-const PRICE_AMOUNT = 13
-const PRICE_CURRENCY = 'usd'
 const NOWPAYMENTS_SANDBOX_URL = 'https://api-sandbox.nowpayments.io/v1'
 const NOWPAYMENTS_LIVE_URL = 'https://api.nowpayments.io/v1'
 
@@ -22,11 +22,32 @@ export async function POST(request: Request) {
       { status: 503 },
     )
   }
+  if (!process.env.NOWPAYMENTS_IPN_SECRET) {
+    return Response.json(
+      { error: 'Payment verification is not configured. Add the NOWPayments IPN secret before opening checkout.' },
+      { status: 503 },
+    )
+  }
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    return Response.json(
+      { error: 'Supabase account access is not configured. Complete authentication setup before checkout.' },
+      { status: 503 },
+    )
+  }
 
   const isSandbox = process.env.NOWPAYMENTS_ENV !== 'production'
   const apiBase = isSandbox ? NOWPAYMENTS_SANDBOX_URL : NOWPAYMENTS_LIVE_URL
   const appBase = process.env.APP_URL ?? new URL(request.url).origin
   const orderId = `skud-${randomUUID()}`
+
+  try {
+    await prisma.paymentOrder.create({ data: { id: orderId } })
+  } catch {
+    return Response.json(
+      { error: 'Payment storage is unavailable. Please try again later.' },
+      { status: 503 },
+    )
+  }
 
   let providerResponse: Response
   try {
@@ -37,23 +58,37 @@ export async function POST(request: Request) {
         'x-api-key': apiKey,
       },
       body: JSON.stringify({
-        price_amount: PRICE_AMOUNT,
-        price_currency: PRICE_CURRENCY,
+        price_amount: SETUP_PRICE_AMOUNT,
+        price_currency: SETUP_PRICE_CURRENCY,
         order_id: orderId,
-        order_description: 'SkuD Turbo MT5 app and Germany server setup',
-        success_url: new URL('/dashboard?checkout=returned', appBase).toString(),
-        cancel_url: new URL('/dashboard?checkout=cancelled', appBase).toString(),
+        order_description: 'Synthyard EA hosting and Germany MT5 server setup',
+        success_url: new URL(
+          `/dashboard?checkout=returned&order_id=${encodeURIComponent(orderId)}`,
+          appBase,
+        ).toString(),
+        cancel_url: new URL(
+          `/dashboard?checkout=cancelled&order_id=${encodeURIComponent(orderId)}`,
+          appBase,
+        ).toString(),
       }),
       cache: 'no-store',
     })
   } catch {
+    await prisma.paymentOrder.update({
+      where: { id: orderId },
+      data: { status: 'FAILED' },
+    })
     return Response.json({ error: 'Could not reach NOWPayments. Please try again.' }, { status: 502 })
   }
 
   const invoice = (await providerResponse.json().catch(() => null)) as NowPaymentsInvoice | null
   if (!providerResponse.ok || !invoice?.invoice_url) {
+    await prisma.paymentOrder.update({
+      where: { id: orderId },
+      data: { status: 'FAILED' },
+    })
     return Response.json(
-      { error: 'NOWPayments could not create a test invoice. Check the sandbox API key and try again.' },
+      { error: 'NOWPayments could not create an invoice. Check the API key and try again.' },
       { status: 502 },
     )
   }

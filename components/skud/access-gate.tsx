@@ -1,44 +1,94 @@
 'use client'
 
+import Image from 'next/image'
 import { useEffect, useState } from 'react'
-import { useIsPwa } from '@/components/pwa/use-is-pwa'
-import { InstallGate } from '@/components/pwa/install-gate'
+import { AccessFlow } from './access-flow'
 import { AccessStart } from './access-start'
 import { CheckoutReturn } from './checkout-return'
 import { Dashboard } from './dashboard'
 import { loadStoredAccount, type StoredMt5Account } from './mt5-session'
-import { DerivMark } from './deriv-logo'
+import { getBrowserSupabase } from '@/lib/supabase'
 
 function AccessSplash() {
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-background">
-      <DerivMark className="size-14 rounded-2xl text-3xl animate-pulse" />
-      <p className="text-[10px] font-extrabold uppercase tracking-[0.3em] text-muted-foreground">
-        SkuD Turbo
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-[#0b0b0d] text-white">
+      <Image src="/logo-synth.webp" alt="Synthyard EA Hosting" width={72} height={72} priority className="size-16 animate-pulse rounded-2xl object-cover" />
+      <p className="text-[10px] font-extrabold uppercase tracking-[0.3em] text-white/65">
+        Synthyard EA Hosting
       </p>
     </main>
   )
 }
 
-export function AccessGate({ preview, checkout }: { preview: boolean; checkout?: string }) {
-  const isPwa = useIsPwa()
-  const [stored, setStored] = useState<StoredMt5Account | null | undefined>(undefined)
+const PAYMENT_ORDER_KEY = 'skud-payment-order'
+
+type AccessState = 'pending' | 'approved' | 'rejected' | 'expired' | 'payment_required' | 'error'
+
+export function AccessGate({ preview, checkout, login }: { preview: boolean; checkout?: string; login?: boolean }) {
+  const [access, setAccess] = useState<AccessState | null | undefined>(undefined)
+  const [orderId, setOrderId] = useState<string | undefined>()
+  const [stored, setStored] = useState<StoredMt5Account | null>(null)
 
   useEffect(() => {
     if (preview) return
-    setStored(loadStoredAccount())
+
+    const query = new URLSearchParams(window.location.search)
+    const queryOrder = query.get('order_id') ?? undefined
+    const savedOrder = window.localStorage.getItem(PAYMENT_ORDER_KEY) ?? undefined
+    const activeOrder = queryOrder ?? savedOrder
+    setOrderId(activeOrder)
+
+    let active = true
+    async function loadAccess() {
+      try {
+        const { data } = await getBrowserSupabase().auth.getSession()
+        const token = data.session?.access_token
+        if (!token) {
+          if (active) setAccess(null)
+          return
+        }
+
+        const response = await fetch('/api/access', {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        })
+        const result = await response.json() as { status?: AccessState; error?: string }
+        if (!response.ok) throw new Error(result.error ?? 'Could not verify subscription access.')
+        if (!active) return
+        setAccess(result.status ?? 'error')
+        if (result.status === 'approved') setStored(loadStoredAccount())
+      } catch {
+        if (active) setAccess('error')
+      }
+    }
+
+    void loadAccess()
+    return () => { active = false }
   }, [preview])
 
   if (preview) return <Dashboard preview />
 
-  // Avoid flashing gated content before client-side detection finishes.
-  if (isPwa === null || stored === undefined) return <AccessSplash />
+  if (access === undefined) return <AccessSplash />
 
-  // Already connected: go straight to the dashboard, even in a plain browser tab.
-  if (stored) return <Dashboard />
+  if (access === 'error') {
+    return (
+      <main className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-background px-5 text-center">
+        <p className="text-lg font-bold">Could not verify account access.</p>
+        <button type="button" onClick={() => window.location.reload()} className="rounded-md border border-border px-4 py-2 text-sm font-bold">
+          Try again
+        </button>
+      </main>
+    )
+  }
 
-  // New users must install the PWA before paying or connecting an MT5 account.
-  if (!isPwa) return <InstallGate />
-
-  return checkout === 'returned' ? <CheckoutReturn /> : <AccessStart />
+  if (access === 'approved') return stored ? <Dashboard /> : <CheckoutReturn />
+  if (access === 'pending' || access === 'rejected') {
+    return <AccessFlow initialAccessStatus={access} orderId={orderId} />
+  }
+  if (orderId && (checkout === 'returned' || access === null || access === 'payment_required' || access === 'expired')) {
+    return <AccessFlow orderId={orderId} />
+  }
+  if (login) return <AccessFlow loginOnly />
+  if (access === 'expired') return <AccessStart />
+  return <AccessStart />
 }

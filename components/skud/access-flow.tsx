@@ -1,0 +1,332 @@
+'use client'
+
+import Image from 'next/image'
+import { useEffect, useState, type FormEvent } from 'react'
+import { getBrowserSupabase } from '@/lib/supabase'
+
+type AccessStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'payment_required'
+
+export function AccessFlow({
+  orderId,
+  initialAccessStatus,
+  loginOnly = false,
+}: {
+  orderId?: string
+  initialAccessStatus?: AccessStatus
+  loginOnly?: boolean
+}) {
+  const [paymentStatus, setPaymentStatus] = useState<'checking' | 'pending' | 'paid' | 'failed'>(
+    orderId ? 'checking' : 'paid',
+  )
+  const [mode, setMode] = useState<'signup' | 'login'>(loginOnly || !orderId ? 'login' : 'signup')
+  const [accessStatus, setAccessStatus] = useState<AccessStatus | null>(initialAccessStatus ?? null)
+  const [expiresAt, setExpiresAt] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  async function checkPayment() {
+    if (!orderId) return
+    try {
+      const response = await fetch(`/api/payments/status?order_id=${encodeURIComponent(orderId)}`, {
+        cache: 'no-store',
+      })
+      const result = await response.json() as { status?: string; error?: string }
+      if (!response.ok) throw new Error(result.error ?? 'Could not check payment status.')
+      if (result.status === 'PAID') setPaymentStatus('paid')
+      else if (result.status === 'FAILED') {
+        window.localStorage.removeItem('skud-payment-order')
+        setPaymentStatus('failed')
+      } else {
+        setPaymentStatus('pending')
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not check payment status.')
+    }
+  }
+
+  useEffect(() => {
+    if (!orderId) return
+    const currentOrderId = orderId
+    let active = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    async function poll() {
+      try {
+        const response = await fetch(`/api/payments/status?order_id=${encodeURIComponent(currentOrderId)}`, {
+          cache: 'no-store',
+        })
+        const result = await response.json() as { status?: string; error?: string }
+        if (!response.ok) throw new Error(result.error ?? 'Could not check payment status.')
+        if (!active) return
+        if (result.status === 'PAID') setPaymentStatus('paid')
+        else if (result.status === 'FAILED') {
+          window.localStorage.removeItem('skud-payment-order')
+          setPaymentStatus('failed')
+        }
+        else {
+          setPaymentStatus('pending')
+          timer = setTimeout(poll, 4000)
+        }
+      } catch (error) {
+        if (!active) return
+        setPaymentStatus('pending')
+        setMessage(error instanceof Error ? error.message : 'Could not check payment status.')
+        timer = setTimeout(poll, 6000)
+      }
+    }
+
+    void poll()
+    return () => {
+      active = false
+      if (timer) clearTimeout(timer)
+    }
+  }, [orderId])
+
+  useEffect(() => {
+    if (!orderId || paymentStatus !== 'paid') return
+    let active = true
+
+    async function linkPaidOrder() {
+      try {
+        const { data } = await getBrowserSupabase().auth.getSession()
+        const token = data.session?.access_token
+        if (!token) return
+        const response = await fetch('/api/access', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ orderId }),
+        })
+        const result = await response.json() as { status?: AccessStatus; expiresAt?: string; error?: string }
+        if (!response.ok) throw new Error(result.error ?? 'Could not link the confirmed payment.')
+        if (!active) return
+        window.localStorage.removeItem('skud-payment-order')
+        setAccessStatus(result.status ?? null)
+        setExpiresAt(result.expiresAt ?? null)
+        if (result.status === 'pending') {
+          setMessage('Payment linked. A mentor must approve your subscription before you can enter the app.')
+        }
+      } catch (error) {
+        if (active) setMessage(error instanceof Error ? error.message : 'Could not link the confirmed payment.')
+      }
+    }
+
+    void linkPaidOrder()
+    return () => { active = false }
+  }, [orderId, paymentStatus])
+
+  async function handleAuth(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setBusy(true)
+    setMessage(null)
+    const data = new FormData(event.currentTarget)
+    const email = String(data.get('email') ?? '').trim()
+    const password = String(data.get('password') ?? '')
+
+    try {
+      const supabase = getBrowserSupabase()
+      const result = mode === 'signup'
+        ? await supabase.auth.signUp({
+            email,
+            password,
+            options: { emailRedirectTo: window.location.href },
+          })
+        : await supabase.auth.signInWithPassword({ email, password })
+      if (result.error) throw result.error
+
+      const session = result.data.session
+      if (!session) {
+        setMessage('Check your email to confirm your account, then sign in here to submit it for mentor approval.')
+        setMode('login')
+        return
+      }
+
+      const response = await fetch('/api/access', orderId ? {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ orderId }),
+      } : {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        cache: 'no-store',
+      })
+      const access = await response.json() as {
+        status: AccessStatus
+        expiresAt?: string
+        error?: string
+      }
+      if (!response.ok) throw new Error(access.error ?? 'Could not register your account.')
+      window.localStorage.removeItem('skud-payment-order')
+      setAccessStatus(access.status)
+      if (access.status === 'approved') setExpiresAt(access.expiresAt ?? null)
+      if (access.status === 'pending') {
+        setMessage('Your payment is confirmed. A mentor must approve your account before you can enter SkuD Turbo.')
+      }
+      if (access.status === 'payment_required') {
+        setMode('login')
+        setMessage('No paid setup is linked to this account. Complete the hosting payment before creating an account.')
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not complete account access.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function refreshApproval() {
+    setBusy(true)
+    setMessage(null)
+    try {
+      const { data } = await getBrowserSupabase().auth.getSession()
+      const token = data.session?.access_token
+      if (!token) {
+        setAccessStatus(null)
+        setMessage('Please sign in again to check your approval.')
+        return
+      }
+      const response = await fetch('/api/access', {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      })
+      const access = await response.json() as { status?: AccessStatus; expiresAt?: string; error?: string }
+      if (!response.ok) throw new Error(access.error ?? 'Could not check approval status.')
+      setAccessStatus(access.status ?? null)
+      setExpiresAt(access.expiresAt ?? null)
+      if (access.status === 'payment_required') setMessage('No paid setup is linked to this account yet.')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not check approval status.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (paymentStatus !== 'paid') {
+    return (
+      <main className="flex min-h-dvh flex-col items-center justify-center bg-[#0b0b0d] px-5 text-center text-white">
+        <Image src="/logo-synth.webp" alt="Synthyard EA Hosting" width={72} height={72} priority className="size-16 rounded-2xl object-cover" />
+        <p className="mt-5 text-xs font-extrabold uppercase tracking-[0.25em] text-white/75">Synthyard EA Hosting</p>
+        <h1 className="mt-6 text-2xl font-bold">
+          {paymentStatus === 'failed' ? 'Payment not completed' : 'Confirming your payment'}
+        </h1>
+        <p className="mt-3 max-w-sm text-sm leading-relaxed text-white/55">
+          {paymentStatus === 'failed'
+            ? 'This payment did not complete. Return to the access page and try again.'
+            : 'We will show SkuD Turbo account setup after the payment provider confirms your payment.'}
+        </p>
+        {message && <p role="status" className="mt-4 max-w-sm text-xs text-white/45">{message}</p>}
+        {paymentStatus === 'pending' && (
+          <button type="button" onClick={() => void checkPayment()} className="mt-6 rounded-md border border-white/25 px-4 py-2 text-sm font-bold text-white hover:bg-white/10">
+            Check payment
+          </button>
+        )}
+        {paymentStatus === 'failed' && (
+          <a href="/dashboard" className="mt-6 rounded-md border border-white/25 px-4 py-2 text-sm font-bold text-white hover:bg-white/10">
+            Return to checkout
+          </a>
+        )}
+      </main>
+    )
+  }
+
+  if (accessStatus === 'pending' || accessStatus === 'rejected') {
+    return (
+      <main className="flex min-h-dvh flex-col items-center justify-center bg-background px-5 text-center text-foreground">
+        <Image src="/logo-synth.webp" alt="Synthyard EA Hosting" width={60} height={60} className="size-12 rounded-xl object-cover" />
+        <p className="mt-5 text-xs font-extrabold uppercase tracking-[0.25em] text-primary">SkuD Turbo</p>
+        <h1 className="mt-4 text-2xl font-extrabold">
+          {accessStatus === 'pending' ? 'Awaiting mentor approval' : 'Access not approved'}
+        </h1>
+        <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">
+          {accessStatus === 'pending'
+            ? 'Your account is registered. A mentor must approve your subscription before the dashboard becomes available.'
+            : 'Please contact your mentor for more information about this account.'}
+        </p>
+        <div className="mt-6 flex gap-3">
+          {accessStatus === 'pending' && (
+            <button type="button" disabled={busy} onClick={() => void refreshApproval()} className="rounded-md bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground disabled:opacity-60">
+              {busy ? 'Checking...' : 'Check approval'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={async () => {
+              await getBrowserSupabase().auth.signOut()
+              window.location.assign('/dashboard?login=1')
+            }}
+            className="rounded-md border border-border px-4 py-2.5 text-sm font-bold"
+          >
+            Sign out
+          </button>
+        </div>
+        {message && <p role="status" className="mt-4 max-w-sm text-xs text-muted-foreground">{message}</p>}
+      </main>
+    )
+  }
+
+  if (accessStatus === 'approved') {
+    return (
+      <main className="flex min-h-dvh items-center justify-center bg-background px-5 text-center text-foreground">
+        <div>
+          <p className="text-xs font-extrabold uppercase tracking-[0.25em] text-primary">SkuD Turbo</p>
+          <h1 className="mt-4 text-2xl font-extrabold">Subscription approved</h1>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Access is active until {expiresAt ? new Date(expiresAt).toLocaleDateString() : 'your renewal date'}.
+          </p>
+          <a href="/dashboard" className="mt-6 inline-flex rounded-md bg-primary px-5 py-3 text-sm font-extrabold text-primary-foreground">
+            Open SkuD Turbo
+          </a>
+        </div>
+      </main>
+    )
+  }
+
+  if (accessStatus === 'expired') {
+    return (
+      <main className="flex min-h-dvh flex-col items-center justify-center bg-[#0b0b0d] px-5 text-center text-white">
+        <h1 className="text-2xl font-bold">Subscription expired</h1>
+        <p className="mt-3 max-w-sm text-sm leading-relaxed text-white/60">
+          Renew your hosting setup, then ask a mentor to approve the next subscription period.
+        </p>
+        <a href="/dashboard" className="mt-6 rounded-md bg-white px-5 py-3 text-sm font-extrabold text-black">
+          Renew access
+        </a>
+      </main>
+    )
+  }
+
+  return (
+    <main className="flex min-h-dvh items-center justify-center bg-background px-5 py-10 text-foreground">
+      <section className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl sm:p-8">
+        <p className="text-[10px] font-extrabold uppercase tracking-[0.24em] text-primary">SkuD Turbo</p>
+        <h1 className="mt-3 text-2xl font-extrabold">{mode === 'signup' ? 'Create your account' : 'Sign in'}</h1>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          {orderId ? 'Payment is confirmed. Create or sign in to the account your mentor will approve.' : 'Sign in to check your mentor-approved subscription.'}
+        </p>
+        <form onSubmit={handleAuth} className="mt-6 flex flex-col gap-4">
+          <label className="flex flex-col gap-2 text-sm font-semibold">
+            Email
+            <input name="email" type="email" autoComplete="email" required className="h-11 rounded-md border border-input bg-background px-3" />
+          </label>
+          <label className="flex flex-col gap-2 text-sm font-semibold">
+            Password
+            <input name="password" type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} minLength={8} required className="h-11 rounded-md border border-input bg-background px-3" />
+          </label>
+          <button type="submit" disabled={busy} className="mt-1 inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-5 text-sm font-extrabold text-primary-foreground disabled:cursor-wait disabled:opacity-60">
+            {busy ? 'Please wait...' : mode === 'signup' ? 'Create account' : 'Sign in'}
+          </button>
+        </form>
+        {!loginOnly && orderId && (
+          <button type="button" onClick={() => { setMode(mode === 'signup' ? 'login' : 'signup'); setMessage(null) }} className="mt-4 w-full text-sm font-semibold text-muted-foreground hover:text-foreground">
+            {mode === 'signup' ? 'Already registered? Sign in' : 'Need an account? Sign up'}
+          </button>
+        )}
+        {loginOnly && <a href="/dashboard" className="mt-4 block text-center text-sm font-semibold text-muted-foreground hover:text-foreground">Need access? Start setup</a>}
+        {message && <p role="status" className="mt-4 rounded-md border border-border px-3 py-2 text-xs leading-relaxed text-muted-foreground">{message}</p>}
+      </section>
+    </main>
+  )
+}
