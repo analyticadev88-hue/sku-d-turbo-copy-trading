@@ -30,9 +30,9 @@ async function fetchBridgeAccounts(): Promise<{ accounts: BridgeAccount[] } | { 
     return { error: body?.error ?? `The MT5 bridge returned status ${bridgeResponse.status}.` }
   }
 
-  const body = await bridgeResponse.json().catch(() => null)
-  if (!Array.isArray(body)) return { error: 'Invalid response from the MT5 bridge.' }
-  return { accounts: body as BridgeAccount[] }
+  const body = await bridgeResponse.json().catch(() => null) as { accounts?: unknown } | null
+  if (!Array.isArray(body?.accounts)) return { error: 'Invalid response from the MT5 bridge.' }
+  return { accounts: body.accounts as BridgeAccount[] }
 }
 
 export async function GET(request: Request) {

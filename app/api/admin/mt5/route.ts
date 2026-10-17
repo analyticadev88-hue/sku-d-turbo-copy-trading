@@ -79,8 +79,12 @@ export async function POST(request: Request) {
   // This deployment has a single mentor: the admin's own connected MT5 account
   // is the copy source. When the login is not on the bridge yet, register it
   // as the mentor (the bridge provisions the account row as role='mentor' and
-  // launches its terminal). When it already exists, just refresh credentials;
-  // omitting `role` keeps the stored role so a mentor account is never demoted.
+  // launches its terminal with the Mentor EA). When it already exists, update
+  // credentials AND promote it to role='mentor' — this route only ever manages
+  // the admin's own account, and an account enrolled earlier as a student
+  // would otherwise keep the Student EA forever.
+  const mentorId = process.env.SKUD_DEFAULT_MENTOR_ID || 'mentor-skud-01'
+  const mentorName = process.env.SKUD_DEFAULT_MENTOR_NAME || 'SkudTurbo'
   let existing = false
   try {
     const listResponse = await fetch(`${config.base}/v1/accounts`, {
@@ -107,8 +111,8 @@ export async function POST(request: Request) {
         method: 'POST',
         headers: auth,
         body: JSON.stringify({
-          mentor_id: process.env.SKUD_DEFAULT_MENTOR_ID || 'mentor-skud-01',
-          mentor_name: process.env.SKUD_DEFAULT_MENTOR_NAME || 'SkudTurbo',
+          mentor_id: mentorId,
+          mentor_name: mentorName,
           login,
           server,
           password,
@@ -138,7 +142,7 @@ export async function POST(request: Request) {
     response = await fetch(`${config.base}/v1/accounts`, {
       method: 'POST',
       headers: auth,
-      body: JSON.stringify({ login, password, server }),
+      body: JSON.stringify({ login, password, server, mentor_id: mentorId, role: 'mentor' }),
       cache: 'no-store',
       signal: AbortSignal.timeout(20_000),
     })

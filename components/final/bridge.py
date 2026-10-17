@@ -1056,13 +1056,34 @@ class BridgeHandler(BaseHTTPRequestHandler):
                         (account["login"], account["password"], account["server"], folder_path,
                          account["mentor_id"], account["role"], account["volume_multiplier"], now, now),
                     )
-            launched, message = tm.ensure_terminal({
+            launch_account = {
                 "login": account["login"],
                 "password": account["password"],
                 "server": account["server"],
                 "folder_path": folder_path,
                 "role": account["role"],
-            })
+            }
+            # Role defaults to "student" when the request omits it, but the stored
+            # role may be "mentor" (the CASE-WHEN above keeps it). Launch with the
+            # stored role so a mentor account always gets the Mentor EA/chart.
+            with db_session() as db:
+                stored = db.execute(
+                    "SELECT role,mentor_id FROM accounts WHERE login=?", (account["login"],)
+                ).fetchone()
+            if stored:
+                launch_account["role"] = stored["role"] or account["role"]
+                if stored["mentor_id"]:
+                    with db_session() as db:
+                        mentor_row = db.execute(
+                            "SELECT mentor_id,mentor_name FROM mentors WHERE mentor_id=?",
+                            (stored["mentor_id"],),
+                        ).fetchone()
+                    if mentor_row:
+                        launch_account["mentor_meta"] = {
+                            "mentor_id": mentor_row["mentor_id"],
+                            "mentor_name": mentor_row["mentor_name"],
+                        }
+            launched, message = tm.ensure_terminal(launch_account)
             return self._send(200, {
                 "login": account["login"],
                 "folder_path": folder_path,
