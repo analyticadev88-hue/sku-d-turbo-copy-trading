@@ -164,3 +164,37 @@ export async function POST(request: Request) {
     headers: { 'Cache-Control': 'no-store' },
   })
 }
+
+export async function DELETE(request: Request) {
+  const access = await requireAdmin(request)
+  if ('error' in access) return access.error
+
+  const config = bridgeConfig()
+  if (!config) return jsonError('MT5 bridge configuration is incomplete.', 503)
+
+  const url = new URL(request.url)
+  const login = url.searchParams.get('login')?.trim() ?? ''
+  if (!/^\d{4,20}$/.test(login)) {
+    return jsonError('Enter a valid MT5 login.', 400)
+  }
+
+  // The bridge deactivation stops the account's MT5 terminal process and marks
+  // the account inactive, so the terminal actually closes on the VPS.
+  let response: Response
+  try {
+    response = await fetch(`${config.base}/v1/accounts/${encodeURIComponent(login)}/deactivate`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${config.key}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(20_000),
+    })
+  } catch {
+    return jsonError('Could not reach the MT5 bridge. Please try again.', 502)
+  }
+
+  const body = await response.json().catch(() => null)
+  return Response.json(body ?? { error: 'Invalid response from the MT5 bridge.' }, {
+    status: response.status,
+    headers: { 'Cache-Control': 'no-store' },
+  })
+}

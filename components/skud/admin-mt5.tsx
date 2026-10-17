@@ -111,10 +111,32 @@ export function AdminMt5({ switchTab }: { switchTab: (tab: AdminTab) => void }) 
     }
   }
 
-  function disconnect() {
-    window.localStorage.removeItem(STORAGE_KEY)
-    setConnected(null)
-    setStatus(null)
+  async function disconnect() {
+    if (!connected) return
+    const target = connected
+    setBusy(true)
+    setError(null)
+    try {
+      const { data: sessionData } = await getBrowserSupabase().auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) throw new Error('Sign in to continue.')
+      const response = await fetch(`/api/admin/mt5?login=${encodeURIComponent(target.login)}`, {
+        method: 'DELETE',
+        headers: { 'x-supabase-access-token': accessToken },
+        cache: 'no-store',
+      })
+      const result = await response.json().catch(() => null) as { error?: string } | null
+      if (!response.ok) {
+        throw new Error(result?.error ?? 'Could not disconnect this account.')
+      }
+      window.localStorage.removeItem(STORAGE_KEY)
+      setConnected(null)
+      setStatus(null)
+    } catch (disconnectError) {
+      setError(disconnectError instanceof Error ? disconnectError.message : 'Could not disconnect this account.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const inputClass = 'h-11 w-full rounded-md border border-white/15 bg-[#1a1a1e] px-3 text-sm text-white outline-none focus-visible:border-primary focus-visible:ring-3 focus-visible:ring-ring/50'
@@ -228,10 +250,11 @@ export function AdminMt5({ switchTab }: { switchTab: (tab: AdminTab) => void }) 
               </button>
               <button
                 type="button"
-                onClick={disconnect}
-                className="inline-flex min-h-10 items-center justify-center rounded-md border border-primary/50 px-4 text-xs font-extrabold uppercase tracking-[0.1em] text-primary transition-colors hover:bg-primary/10"
+                onClick={() => { void disconnect() }}
+                disabled={busy}
+                className="inline-flex min-h-10 items-center justify-center rounded-md border border-primary/50 px-4 text-xs font-extrabold uppercase tracking-[0.1em] text-primary transition-colors hover:bg-primary/10 disabled:cursor-wait disabled:opacity-60"
               >
-                Disconnect
+                {busy ? 'Disconnecting…' : 'Disconnect'}
               </button>
             </div>
           </article>
