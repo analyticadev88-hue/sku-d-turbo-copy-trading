@@ -12,7 +12,11 @@ import {
 import { getBrowserSupabase } from '@/lib/supabase'
 import type { AdminTab } from './admin-app'
 
-const FALLBACK_SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'EURGBP', 'XAUUSD', 'USDCHF', 'NZDUSD']
+const FALLBACK_SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'EURGBP', 'XAUUSD', 'USDCHF', 'NZDUSD',
+  'Volatility 10 Index', 'Volatility 25 Index', 'Volatility 50 Index', 'Volatility 75 Index', 'Volatility 100 Index',
+  'Volatility 10 (1s) Index', 'Volatility 25 (1s) Index', 'Volatility 50 (1s) Index', 'Volatility 75 (1s) Index', 'Volatility 100 (1s) Index',
+  'Boom 500 Index', 'Boom 1000 Index', 'Crash 500 Index', 'Crash 1000 Index',
+  'Step Index 10', 'Step Index 25', 'Step Index 50', 'Step Index 75', 'Step Index 100']
 const ADMIN_MT5_KEY = 'skud-admin-mt5'
 
 type TradeSide = 'BUY' | 'SELL'
