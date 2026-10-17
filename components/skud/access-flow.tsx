@@ -359,10 +359,11 @@ export function AccessFlow({
             {busy ? 'Please wait...' : mode === 'signup' ? 'Create account' : 'Sign in'}
           </button>
         </form>
-        <button type="button" onClick={() => { setMode(mode === 'signup' ? 'login' : 'signup'); setMessage(null) }} className="mt-4 w-full text-sm font-semibold text-white/55 transition-colors hover:text-white">
-          {mode === 'signup' ? 'Already registered? Sign in' : 'Need an account? Create one'}
-        </button>
-        {loginOnly && <a href="/dashboard" className="mt-2 block text-center text-sm font-semibold text-white/55 transition-colors hover:text-white">Need access? Start setup</a>}
+        {!loginOnly && (
+          <button type="button" onClick={() => { setMode(mode === 'signup' ? 'login' : 'signup'); setMessage(null) }} className="mt-4 w-full text-sm font-semibold text-white/55 transition-colors hover:text-white">
+            {mode === 'signup' ? 'Already registered? Sign in' : 'Need an account? Create one'}
+          </button>
+        )}
         {message && <p role="status" className="mt-4 rounded-md border border-white/15 bg-white/5 px-3 py-2 text-xs leading-relaxed text-white/65">{message}</p>}
       </section>
     </main>

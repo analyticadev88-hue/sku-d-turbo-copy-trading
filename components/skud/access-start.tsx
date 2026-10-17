@@ -46,12 +46,20 @@ export function AccessStart() {
             </span>
           </span>
         </Link>
-        <Link
-          href="/"
-          className="text-xs font-bold uppercase tracking-[0.18em] text-white/65 transition-colors hover:text-white"
-        >
-          Back to home
-        </Link>
+        <div className="flex items-center gap-5">
+          <Link
+            href="/dashboard?login=1"
+            className="text-xs font-bold uppercase tracking-[0.18em] text-white/65 transition-colors hover:text-white"
+          >
+            Sign in
+          </Link>
+          <Link
+            href="/"
+            className="text-xs font-bold uppercase tracking-[0.18em] text-white/65 transition-colors hover:text-white"
+          >
+            Back to home
+          </Link>
+        </div>
       </header>
 
       <section className="mx-auto flex w-full max-w-7xl flex-1 items-end px-5 pb-16 pt-20 sm:px-8 sm:pb-24 lg:items-center lg:pb-28">
@@ -82,9 +90,8 @@ export function AccessStart() {
         </div>
       </section>
 
-      <footer className="mx-auto flex w-full max-w-7xl items-center justify-between px-5 pb-5 text-[10px] font-bold uppercase tracking-[0.16em] text-white/45 sm:px-8">
+      <footer className="mx-auto flex w-full max-w-7xl items-center px-5 pb-5 text-[10px] font-bold uppercase tracking-[0.16em] text-white/45 sm:px-8">
         <span>© Synthyard EA Hosting</span>
-        <Link href="/dashboard?login=1" className="transition-colors hover:text-white">Approved user? Sign in</Link>
       </footer>
 
       <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
