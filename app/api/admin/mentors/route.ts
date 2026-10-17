@@ -97,9 +97,9 @@ export async function POST(request: Request) {
   }
 
   const result = await response.json().catch(() => null) as
-    | { error?: string; mentor_token?: string; terminal?: string }
+    | { error?: string; terminal?: string }
     | null
-  if (!response.ok || !result?.mentor_token) {
+  if (!response.ok || !result) {
     return jsonError(result?.error ?? 'Could not register mentor.', response.status || 502)
   }
 
@@ -108,7 +108,6 @@ export async function POST(request: Request) {
     mentorName,
     login,
     server,
-    mentorToken: result.mentor_token,
     terminal: result.terminal ?? '',
   }, { headers: { 'Cache-Control': 'no-store' } })
 }

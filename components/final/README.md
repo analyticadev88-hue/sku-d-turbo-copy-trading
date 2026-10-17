@@ -34,10 +34,11 @@ missing file): the bridge finds `SkuDTurboStudentEA.ex5` /
 saved chart profiles by scanning `MQL5\Profiles\Charts` for the chart that has
 each EA attached. It prints what it found at startup. Set the variables only to
 override the discovery. Mentor-hosted terminals use three additional optional
-variables: `SKUD_MENTOR_EA_SOURCE` (compiled `SkuDTurboMentorEA.ex5`),
-`SKUD_MENTOR_CHART_TEMPLATE` (a chart profile with the Mentor EA attached), and
-`SKUD_MENTOR_EA_TOKEN` (the token written into that chart; defaults to
-`SKUD_BRIDGE_KEY` when unset).
+variables: `SKUD_MENTOR_EA_SOURCE` (compiled `SkuDTurboMentorEA.ex5`) and
+`SKUD_MENTOR_CHART_TEMPLATE` (a chart profile with the Mentor EA attached).
+Managed mentor terminals receive `SKUD_BRIDGE_KEY` in the EA's `BridgeKey`
+input. A manually managed Mentor EA uses the same platform key; there is no
+separate mentor token.
 
 The public hostname is controlled by the `SKUD_BRIDGE_HOST` environment
 variable (Caddyfile; falls back to `skud.toporapula.dev`). The app never talks
@@ -128,8 +129,8 @@ the chart into every slot under its own profile name (`Charts\SkuD` for
 students, `Charts\Mentor` for the mentor account) and launches MT5 with
 `/profile:<name>`, so each terminal deterministically opens the right chart —
 MT5 never restores whatever profile was last active in the master. The bridge
-rewrites `EaToken` / `MentorToken` inside the copied `.chr` at launch, so the
-chart can never lock a terminal out with a stale token. Disconnecting an
+rewrites `EaToken` / `BridgeKey` inside the copied `.chr` at launch, migrating
+legacy `MentorToken` settings so the chart cannot retain stale credentials. Disconnecting an
 account (bridge `…/deactivate`) stops the terminal **and** wipes the slot's
 saved charts, so the next login starts from a fresh template chart.
 
@@ -205,9 +206,10 @@ Set-Location C:\skud\final
 
 After the bridge health check succeeds, register the mentor through the
 protected `POST /api/admin/mentors` route using `SKUD_MENTOR_SETUP_CODE`. The
-response returns a one-time `mentorToken`; enter that value in
-`SkuDTurboMentorEA.mq5` on the mentor's demo account. Compile the Mentor EA and
-allow WebRequest to `https://skud.toporapula.dev` in MT5.
+The Mentor EA uses the platform `SKUD_BRIDGE_KEY`; managed terminals receive it
+automatically. For a manually managed terminal, enter the same key in the EA's
+`BridgeKey` input. Compile the Mentor EA and allow WebRequest to
+`https://skud.toporapula.dev` in MT5.
 
 Enable demo enrollment only after mentor registration and the student EA/chart
 template are ready. Submit a Deriv demo login, trading password, and server from
@@ -242,8 +244,8 @@ When `password` is present (empty or 6-128 characters) the bridge:
    like student provisioning) and upserts an `accounts` row with
    `role='mentor'` and `mentor_id` pointing at the mentor.
 2. Installs the Mentor EA (`SKUD_MENTOR_EA_SOURCE`) and the mentor chart
-   template (`SKUD_MENTOR_CHART_TEMPLATE`), rewriting `MentorToken=`
-   (`SKUD_MENTOR_EA_TOKEN`, falling back to `SKUD_BRIDGE_KEY`), `MentorId=`,
+   template (`SKUD_MENTOR_CHART_TEMPLATE`), rewriting `BridgeKey=`
+   (`SKUD_BRIDGE_KEY`), `MentorId=`,
    and `MentorName=` inside the copied `.chr` (UTF-16 aware, same as the
    student `EaToken` rewrite).
 3. Launches the terminal with `startup.ini` auto-login and returns a

@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Copy, Check } from 'lucide-react'
+import { Check } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -37,7 +37,6 @@ type CreatedMentor = {
   mentorName: string
   login: string
   server: string
-  mentorToken: string
   terminal?: string
 }
 
@@ -74,7 +73,6 @@ export function AdminMentors() {
   const [formError, setFormError] = useState<string | null>(null)
   const [formBusy, setFormBusy] = useState(false)
   const [created, setCreated] = useState<CreatedMentor | null>(null)
-  const [tokenCopied, setTokenCopied] = useState(false)
 
   const [assignAccount, setAssignAccount] = useState('')
   const [assignMentor, setAssignMentor] = useState('')
@@ -136,7 +134,6 @@ export function AdminMentors() {
         }),
       }) as CreatedMentor
       setCreated(result)
-      setTokenCopied(false)
       setMentorId('')
       setMentorName('')
       setLogin('')
@@ -444,23 +441,8 @@ export function AdminMentors() {
           </DialogHeader>
           {created && (
             <div className="mt-4">
-              <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-white/45">One-time mentor token</p>
-              <div className="mt-2 flex items-center gap-2 rounded-md border border-white/15 bg-[#1a1a1e] p-2">
-                <code className="min-w-0 flex-1 break-all px-1 font-mono text-xs text-white">{created.mentorToken}</code>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(created.mentorToken)
-                    setTokenCopied(true)
-                  }}
-                  className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md border border-white/15 px-3 text-[11px] font-extrabold uppercase tracking-[0.08em] text-white transition-colors hover:border-primary/50 hover:text-primary"
-                >
-                  {tokenCopied ? <Check className="size-3.5" aria-hidden="true" /> : <Copy className="size-3.5" aria-hidden="true" />}
-                  {tokenCopied ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-              <p className="mt-2 text-xs leading-relaxed text-primary">
-                Save it now — it won&apos;t be shown again.
+              <p className="text-xs leading-relaxed text-white/55">
+                The mentor EA uses the platform bridge key. Managed terminals receive it automatically; for a manually managed terminal, enter the existing platform key in the EA&apos;s BridgeKey setting.
               </p>
               {created.terminal && (
                 <p className="mt-3 text-xs leading-relaxed text-white/55">{created.terminal}</p>

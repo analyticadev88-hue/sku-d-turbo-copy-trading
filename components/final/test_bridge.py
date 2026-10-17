@@ -72,7 +72,6 @@ class BridgeTests(unittest.TestCase):
             return error.code, response
 
     def setUp(self):
-        self.mentor_token = ""
         with bridge.db_session() as db:
             db.execute("DELETE FROM orders")
             db.execute("DELETE FROM batches")
@@ -93,16 +92,13 @@ class BridgeTests(unittest.TestCase):
         return self.request("/v1/accounts", "POST", BRIDGE_KEY, payload)
 
     def register_mentor(self):
-        status, body = self.request("/v1/mentors", "POST", BRIDGE_KEY, {
+        return self.request("/v1/mentors", "POST", BRIDGE_KEY, {
             "mentor_id": "mentor-skud-01", "mentor_name": "SkudTurbo",
             "login": "987654", "server": "OtherBroker-Demo",
         })
-        if status == 200:
-            self.mentor_token = json.loads(body)["mentor_token"]
-        return status, body
 
     def mentor_event(self, event_id="123456789", event_type="open"):
-        return self.request("/v1/mentor/events", "POST", self.mentor_token, {
+        return self.request("/v1/mentor/events", "POST", BRIDGE_KEY, {
             "mentor_id": "mentor-skud-01", "mentor_name": "SkudTurbo",
             "login": "987654", "server": "OtherBroker-Demo",
             "event_id": event_id, "position_id": "123456789",
@@ -128,6 +124,18 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(replay_status, 200)
         self.assertTrue(json.loads(replay)["replayed"])
         self.assertEqual(json.loads(replay)["orders"], json.loads(body)["orders"])
+
+    def test_mt5_symbol_case_is_preserved_in_commands(self):
+        self.provision()
+        status, body = self.request("/v1/orders", "POST", BRIDGE_KEY,
+                                    {"login": "123456", "orders": [{
+                                        "symbol": "Boom 1000 Index", "order_type": "MARKET_BUY", "volume": 0.1,
+                                    }]},
+                                    {"Idempotency-Key": "preserve-symbol-case-01"})
+        self.assertEqual(status, 202, body)
+        status, command = self.request("/v1/commands/next?login=123456", token="test-ea-token")
+        self.assertEqual(status, 200)
+        self.assertEqual(command.decode().split("|")[1], "Boom 1000 Index")
 
     def test_ea_poll_claims_each_order_and_records_result(self):
         self.provision()
@@ -345,7 +353,7 @@ class BridgeTests(unittest.TestCase):
 
     def test_mentor_event_rejects_unregistered_source_account(self):
         self.register_mentor()
-        status, body = self.request("/v1/mentor/events", "POST", self.mentor_token, {
+        status, body = self.request("/v1/mentor/events", "POST", BRIDGE_KEY, {
             "mentor_id": "mentor-skud-01", "mentor_name": "SkudTurbo",
             "login": "345643", "server": "OtherBroker-Demo",
             "event_id": "123456789", "position_id": "123456789",
@@ -362,7 +370,7 @@ class BridgeTests(unittest.TestCase):
             "event_id": "123456789", "position_id": "123456789",
             "event_type": "open", "symbol": "EURUSD", "side": "buy", "volume": 0.1,
         })
-        self.assertEqual(status, 403)
+        self.assertEqual(status, 401)
 
     def test_mentor_close_targets_only_confirmed_student_ticket(self):
         self.register_mentor()
@@ -489,6 +497,24 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual({price["symbol"] for price in json.loads(body)["prices"]},
                          {"Volatility 10 (1s) Index", "XAUUSD"})
+
+    def test_registered_mentor_publishes_prices_with_platform_key(self):
+        status, body = self.register_mentor()
+        self.assertEqual(status, 200, body)
+        self.assertNotIn("mentor_token", json.loads(body))
+        status, body = self.request("/v1/prices", "POST", BRIDGE_KEY, {
+            "login": "987654",
+            "ticks": [{"symbol": "Boom 1000 Index", "bid": 123.4, "ask": 123.5}],
+        })
+        self.assertEqual(status, 200, body)
+        self.assertEqual(json.loads(body)["count"], 1)
+        self.assertEqual(self.request("/v1/prices", "POST", "test-ea-token", {
+            "login": "987654",
+            "ticks": [{"symbol": "Boom 1000 Index", "bid": 123.5, "ask": 123.6}],
+        })[0], 401)
+        status, body = self.request("/v1/prices?login=987654", token=BRIDGE_KEY)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["prices"][0]["symbol"], "Boom 1000 Index")
 
     def test_prices_reject_unknown_login_and_bad_symbols(self):
         self.provision()
@@ -733,14 +759,15 @@ class BridgeTests(unittest.TestCase):
             "[Experts]\r\nMentorToken=old\r\nMentorId=old-id\r\nMentorName=old-name\r\nEaToken=keep\r\n",
             encoding="utf-16",
         )
-        with patch.object(bridge.tm, "MENTOR_EA_TOKEN", "mentor-token-1"):
+        with patch.object(bridge.tm, "MENTOR_BRIDGE_KEY", "platform-bridge-key-1"):
             bridge.tm.sync_chart_inputs(chart, {
-                "MentorToken": bridge.tm.MENTOR_EA_TOKEN,
+                "BridgeKey": bridge.tm.MENTOR_BRIDGE_KEY,
                 "MentorId": "mentor-skud-01",
                 "MentorName": "SkudTurbo",
             })
         text = chart.read_text(encoding="utf-16")
-        self.assertIn("MentorToken=mentor-token-1", text)
+        self.assertIn("BridgeKey=platform-bridge-key-1", text)
+        self.assertNotIn("MentorToken=", text)
         self.assertIn("MentorId=mentor-skud-01", text)
         self.assertIn("MentorName=SkudTurbo", text)
         self.assertIn("EaToken=keep", text)

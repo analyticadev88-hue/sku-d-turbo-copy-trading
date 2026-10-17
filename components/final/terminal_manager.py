@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 TERMINALS_DIR = Path(os.environ.get("SKUD_TERMINALS_DIR", r"C:\skud\terminals"))
-MENTOR_EA_TOKEN = os.environ.get("SKUD_MENTOR_EA_TOKEN", "") or os.environ.get("SKUD_BRIDGE_KEY", "")
+MENTOR_BRIDGE_KEY = os.environ.get("SKUD_BRIDGE_KEY", "")
 TERMINAL_MASTER = os.environ.get("SKUD_TERMINAL_MASTER", r"C:\skud\mt5-master")
 LAUNCH_STAGGER_SEC = float(os.environ.get("SKUD_LAUNCH_STAGGER_SEC", "5"))
 
@@ -250,6 +250,12 @@ def sync_chart_inputs(chart_path: Path, replacements: dict[str, str]) -> None:
     if not any(key + "=" in text for key in replacements):
         return
     updated = text
+    if "BridgeKey" in replacements and "BridgeKey=" not in updated:
+        updated = re.sub(
+            r"(?m)^MentorToken=.*$",
+            lambda _: "BridgeKey=" + replacements["BridgeKey"],
+            updated,
+        )
     for key, value in replacements.items():
         updated = re.sub(r"(?m)^" + re.escape(key) + r"=.*$", key + "=" + value, updated)
     if updated != text:
@@ -351,7 +357,7 @@ def _install_mentor_files(folder: Path, account: dict, warnings: list[str]) -> N
         charts.mkdir(parents=True, exist_ok=True)
         target_chart = charts / Path(MENTOR_CHART_TEMPLATE).name
         shutil.copy2(MENTOR_CHART_TEMPLATE, target_chart)
-        replacements: dict[str, str] = {"MentorToken": MENTOR_EA_TOKEN}
+        replacements: dict[str, str] = {"BridgeKey": MENTOR_BRIDGE_KEY}
         mentor_meta = account.get("mentor_meta") or {}
         mentor_id = str(mentor_meta.get("mentor_id", "") or "")
         mentor_name = str(mentor_meta.get("mentor_name", "") or "")

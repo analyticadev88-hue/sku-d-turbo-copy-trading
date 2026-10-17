@@ -39,6 +39,10 @@ function clampVolume(raw: number, min: number, max: number, step: number): numbe
   return Number((Math.min(max, Math.max(min, snapped))).toFixed(fixed))
 }
 
+function formatPrice(value: number): string {
+  return value.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 8 })
+}
+
 export function AdminTrade({ switchTab }: { switchTab: (tab: AdminTab) => void }) {
   const [adminAccount, setAdminAccount] = useState<{ login: string; server: string } | null | undefined>(undefined)
   const [accounts, setAccounts] = useState<{ login: string; server?: string; is_active?: boolean }[] | null>(null)
@@ -48,6 +52,10 @@ export function AdminTrade({ switchTab }: { switchTab: (tab: AdminTab) => void }
   const [symbol, setSymbol] = useState(FALLBACK_SYMBOLS[0])
   const [side, setSide] = useState<TradeSide>('BUY')
   const [volume, setVolume] = useState('0.01')
+  const [tpEnabled, setTpEnabled] = useState(false)
+  const [tpDistance, setTpDistance] = useState('')
+  const [slEnabled, setSlEnabled] = useState(false)
+  const [slDistance, setSlDistance] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [results, setResults] = useState<AccountResult[] | null>(null)
@@ -103,12 +111,16 @@ export function AdminTrade({ switchTab }: { switchTab: (tab: AdminTab) => void }
         cache: 'no-store',
       })
       if (!response.ok) return
-      const result = await response.json().catch(() => null)
-      if (!Array.isArray(result)) return
-      const rows = result as PriceRow[]
+      const result = await response.json().catch(() => null) as { prices?: unknown } | PriceRow[] | null
+      const rows = Array.isArray(result)
+        ? result as PriceRow[]
+        : result && typeof result === 'object' && Array.isArray(result.prices)
+          ? result.prices as PriceRow[]
+          : null
+      if (!rows) return
       setPrices(rows)
       const bridgeSymbols = [...new Set(rows
-        .map((row) => String(row.symbol ?? '').toUpperCase())
+        .map((row) => String(row.symbol ?? '').trim())
         .filter((value) => value.length > 0))]
       if (bridgeSymbols.length > 0) {
         setSymbols((current) => {
@@ -130,7 +142,7 @@ export function AdminTrade({ switchTab }: { switchTab: (tab: AdminTab) => void }
     return () => clearInterval(interval)
   }, [adminAccount, loadAccounts, loadPrices])
 
-  const selectedPrice = prices.find((row) => String(row.symbol ?? '').toUpperCase() === symbol)
+  const selectedPrice = prices.find((row) => String(row.symbol ?? '').toUpperCase() === symbol.toUpperCase())
   const bid = Number(selectedPrice?.bid ?? NaN)
   const ask = Number(selectedPrice?.ask ?? NaN)
   const volumeMin = Number(selectedPrice?.volume_min ?? 0.01)
@@ -175,6 +187,10 @@ export function AdminTrade({ switchTab }: { switchTab: (tab: AdminTab) => void }
           symbol,
           side,
           volume: finalVolume,
+          tpEnabled,
+          tpDistance: tpEnabled ? Number(tpDistance) : 0,
+          slEnabled,
+          slDistance: slEnabled ? Number(slDistance) : 0,
           ...(adminAccount ? { mirrorLogin: adminAccount.login } : {}),
         }),
       })
@@ -263,18 +279,18 @@ export function AdminTrade({ switchTab }: { switchTab: (tab: AdminTab) => void }
               <div className="rounded-lg border border-white/10 bg-[#1a1a1e] p-3 text-center">
                 <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-white/45">Bid</p>
                 <p className={`mt-1 font-mono text-xl font-extrabold transition-colors ${flash.bid === 'up' ? 'text-[#4bb543]' : flash.bid === 'down' ? 'text-primary' : 'text-white'}`}>
-                  {Number.isFinite(bid) ? bid.toFixed(5) : '—'}
+                  {Number.isFinite(bid) ? formatPrice(bid) : '—'}
                 </p>
               </div>
               <div className="rounded-lg border border-white/10 bg-[#1a1a1e] p-3 text-center">
                 <p className="text-[9px] font-extrabold uppercase tracking-[0.18em] text-white/45">Ask</p>
                 <p className={`mt-1 font-mono text-xl font-extrabold transition-colors ${flash.ask === 'up' ? 'text-[#4bb543]' : flash.ask === 'down' ? 'text-primary' : 'text-white'}`}>
-                  {Number.isFinite(ask) ? ask.toFixed(5) : '—'}
+                  {Number.isFinite(ask) ? formatPrice(ask) : '—'}
                 </p>
               </div>
             </div>
             <p className="mt-2 text-center text-[11px] text-white/45">
-              {Number.isFinite(spread) ? `Spread ${spread.toFixed(5)}` : 'Waiting for the first quote…'}
+              {Number.isFinite(spread) ? `Spread ${formatPrice(spread)}` : 'Waiting for the first quote…'}
             </p>
           </div>
 
@@ -312,6 +328,44 @@ export function AdminTrade({ switchTab }: { switchTab: (tab: AdminTab) => void }
             />
             <p className="text-xs text-white/45">Lots (min {volumeMin}, step {volumeStep})</p>
           </div>
+
+          <div className="grid grid-cols-2 gap-3 border-t border-white/10 pt-3">
+            <div className="flex flex-col gap-2">
+              <label className="inline-flex items-center gap-2 text-sm text-white/75">
+                <input type="checkbox" checked={tpEnabled} onChange={(event) => setTpEnabled(event.target.checked)} />
+                Take profit
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={tpDistance}
+                onChange={(event) => setTpDistance(event.target.value)}
+                disabled={!tpEnabled}
+                aria-label="Take profit distance in price units"
+                placeholder="Distance"
+                className="h-10 w-full rounded-md border border-white/15 bg-[#1a1a1e] px-3 text-sm text-white outline-none focus-visible:border-primary focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-45"
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <label className="inline-flex items-center gap-2 text-sm text-white/75">
+                <input type="checkbox" checked={slEnabled} onChange={(event) => setSlEnabled(event.target.checked)} />
+                Stop loss
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={slDistance}
+                onChange={(event) => setSlDistance(event.target.value)}
+                disabled={!slEnabled}
+                aria-label="Stop loss distance in price units"
+                placeholder="Distance"
+                className="h-10 w-full rounded-md border border-white/15 bg-[#1a1a1e] px-3 text-sm text-white outline-none focus-visible:border-primary focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-45"
+              />
+            </div>
+          </div>
+          <p className="-mt-2 text-xs text-white/45">TP and SL distances use price units from the order entry. Broker minimum stop distances apply.</p>
 
           <p className="text-xs text-white/45">
             Will send to {activeCount} connected client account{activeCount === 1 ? '' : 's'} plus your account

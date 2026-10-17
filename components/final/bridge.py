@@ -16,7 +16,6 @@ import json
 import math
 import os
 import re
-import secrets
 import sqlite3
 import subprocess
 import threading
@@ -888,8 +887,6 @@ class BridgeHandler(BaseHTTPRequestHandler):
             except (json.JSONDecodeError, ValueError, AttributeError) as error:
                 return self._send(400, {"error": str(error)})
             now = time.time()
-            mentor_token = secrets.token_urlsafe(32)
-            token_hash = hashlib.sha256(mentor_token.encode("utf-8")).hexdigest()
             with db_session() as db:
                 conflict = db.execute(
                     "SELECT mentor_id FROM mentors WHERE login=? AND server=? AND mentor_id!=?",
@@ -902,11 +899,10 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     "VALUES(?,?,?,?,?,1,?,?) ON CONFLICT(mentor_id) DO UPDATE SET "
                     "mentor_name=excluded.mentor_name,login=excluded.login,server=excluded.server,"
                     "token_hash=excluded.token_hash,is_active=1,updated_at=excluded.updated_at",
-                    (mentor["mentor_id"], mentor["mentor_name"], mentor["login"], mentor["server"], token_hash, now, now),
+                    (mentor["mentor_id"], mentor["mentor_name"], mentor["login"], mentor["server"], "", now, now),
                 )
             response = {
                 "mentor_id": mentor["mentor_id"], "mentor_name": mentor["mentor_name"],
-                "mentor_token": mentor_token,
             }
             if mentor["password"]:
                 try:
@@ -919,7 +915,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             return self._send(200, response)
         if parsed.path == "/v1/mentor/events":
             authorization = self.headers.get("Authorization", "")
-            if not authorization.startswith("Bearer "):
+            if not auth_matches(authorization, BRIDGE_KEY):
                 return self._send(401, {"error": "Unauthorized"})
             try:
                 event = validate_mentor_event(self._read_json())
@@ -929,12 +925,10 @@ class BridgeHandler(BaseHTTPRequestHandler):
             with db_session() as db:
                 db.execute("BEGIN IMMEDIATE")
                 mentor = db.execute(
-                    "SELECT mentor_name,login,server,is_active,token_hash FROM mentors WHERE mentor_id=?",
+                    "SELECT mentor_name,login,server,is_active FROM mentors WHERE mentor_id=?",
                     (event["mentor_id"],),
                 ).fetchone()
-                supplied_hash = hashlib.sha256(authorization[7:].encode("utf-8")).hexdigest()
-                # Single-mentor deployment: the operator configures the mentor EA
-                # with the bridge key itself, so accept it alongside the per-mentor token.
+                # A bridge-key event may register the one configured platform mentor.
                 supplied_is_bridge_key = auth_matches(authorization, BRIDGE_KEY)
                 if not mentor and supplied_is_bridge_key:
                     db.execute(
@@ -943,12 +937,10 @@ class BridgeHandler(BaseHTTPRequestHandler):
                         (event["mentor_id"], event["mentor_name"], event["login"], event["server"], now, now),
                     )
                     mentor = db.execute(
-                        "SELECT mentor_name,login,server,is_active,token_hash FROM mentors WHERE mentor_id=?",
+                        "SELECT mentor_name,login,server,is_active FROM mentors WHERE mentor_id=?",
                         (event["mentor_id"],),
                     ).fetchone()
-                if (not mentor or not mentor["is_active"]
-                        or (not supplied_is_bridge_key
-                            and not hmac.compare_digest(supplied_hash, mentor["token_hash"]))):
+                if not mentor or not mentor["is_active"]:
                     return self._send(403, {"error": "Mentor is not registered or is inactive."})
                 if (mentor["login"], mentor["server"]) != (event["login"], event["server"]):
                     return self._send(403, {"error": "Trade event account does not match the registered mentor."})
@@ -1332,7 +1324,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 return self._send(404, {"error": "Unknown or already completed close request."})
             return self._send(200, {"status": "recorded"})
         if parsed.path == "/v1/prices":
-            if not ea_authed(self.headers.get("Authorization", "")):
+            authorization = self.headers.get("Authorization", "")
+            if not ea_authed(authorization):
                 return self._send(401, {"error": "Unauthorized"})
             try:
                 payload = self._read_json()
@@ -1341,8 +1334,14 @@ class BridgeHandler(BaseHTTPRequestHandler):
             except (json.JSONDecodeError, ValueError, AttributeError) as error:
                 return self._send(400, {"error": str(error)})
             with db_session() as db:
-                known = db.execute("SELECT 1 FROM accounts WHERE login=?", (login,)).fetchone()
-                if not known:
+                account = db.execute("SELECT role FROM accounts WHERE login=?", (login,)).fetchone()
+                mentor = db.execute(
+                    "SELECT 1 FROM mentors WHERE login=? AND is_active=1", (login,)
+                ).fetchone()
+                is_mentor = bool(mentor or (account and account["role"] == "mentor"))
+                if is_mentor and not auth_matches(authorization, BRIDGE_KEY):
+                    return self._send(401, {"error": "Mentor price reports require the platform bridge key."})
+                if not account and not mentor:
                     return self._send(403, {"error": "Price login is not a registered SkuD account."})
                 now = time.time()
                 db.executemany(

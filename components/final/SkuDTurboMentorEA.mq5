@@ -1,11 +1,11 @@
 // Mentor publisher EA. Install only on the source account terminal.
 #property strict
-#property version "1.10"
+#property version "1.11"
 
 input string BridgeUrl = "https://skud.toporapula.dev";
 input string MentorId = "mentor-skud-01";
 input string MentorName = "SkudTurbo";
-input string MentorToken = "";
+input string BridgeKey = "";
 input int RetrySeconds = 2;
 input int ReportSeconds = 3;
 
@@ -24,12 +24,13 @@ ulong g_last_symbol_warn_ms = 0;
 int OnInit()
 {
    if(StringLen(BridgeUrl) < 8 || StringLen(MentorId) < 3 || StringLen(MentorName) < 1 ||
-      StringLen(MentorToken) < 32 || RetrySeconds < 1 || ReportSeconds < 1)
+      StringLen(BridgeKey) < 32 || RetrySeconds < 1 || ReportSeconds < 1)
       return INIT_PARAMETERS_INCORRECT;
    EventSetTimer(RetrySeconds);
-   Print("SkuD Mentor EA build 1.10 ready for ", MentorName, " (", MentorId, "). MT5 login: ",
+   Print("SkuD Mentor EA build 1.11 ready for ", MentorName, " (", MentorId, "). MT5 login: ",
          (long)AccountInfoInteger(ACCOUNT_LOGIN));
-   Print("Allow WebRequest for ", BridgeUrl, " in MT5 Options > Expert Advisors.");
+      Print("Mentor EA uses the platform BridgeKey. Allow WebRequest for ", BridgeUrl,
+         " in MT5 Options > Expert Advisors.");
    return INIT_SUCCEEDED;
 }
 
@@ -55,7 +56,7 @@ void OnTimer()
          else if(status >= 400 && status < 500)
          {
             Print("Mentor trade event rejected, HTTP ", status, ": ", response,
-                  ". Check mentor registration, account, and token.");
+               ". Check mentor registration, account, and platform bridge key.");
             for(int index = 1; index < ArraySize(g_pending_events); index++)
                g_pending_events[index - 1] = g_pending_events[index];
             ArrayResize(g_pending_events, ArraySize(g_pending_events) - 1);
@@ -247,7 +248,7 @@ bool SendRequestTo(const string path, const string body, string &response, int &
    StringToCharArray(body, data, 0, WHOLE_ARRAY, CP_UTF8);
    if(ArraySize(data) > 0 && data[ArraySize(data) - 1] == 0)
       ArrayResize(data, ArraySize(data) - 1);
-   string headers = "Authorization: Bearer " + MentorToken + "\r\nContent-Type: application/json\r\n";
+   string headers = "Authorization: Bearer " + BridgeKey + "\r\nContent-Type: application/json\r\n";
    ResetLastError();
    http_status = WebRequest("POST", BridgeUrl + path, headers, 5000,
                             data, result, result_headers);
