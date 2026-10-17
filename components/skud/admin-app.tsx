@@ -2,20 +2,18 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Cable, GraduationCap, LineChart, Users } from 'lucide-react'
+import { Cable, LineChart, Users } from 'lucide-react'
 import { getBrowserSupabase } from '@/lib/supabase'
 import { DerivMark } from './deriv-logo'
 import { AdminClients } from './admin-clients'
-import { AdminMentors } from './admin-mentors'
 import { AdminMt5 } from './admin-mt5'
 import { AdminTrade } from './admin-trade'
 
-export type AdminTab = 'home' | 'clients' | 'mentors' | 'mt5'
+export type AdminTab = 'home' | 'clients' | 'mt5'
 
 const TABS: { id: AdminTab; label: string; icon: typeof LineChart }[] = [
   { id: 'home', label: 'Home', icon: LineChart },
   { id: 'clients', label: 'Clients', icon: Users },
-  { id: 'mentors', label: 'Mentors', icon: GraduationCap },
   { id: 'mt5', label: 'MT5', icon: Cable },
 ]
 
@@ -54,7 +52,6 @@ export function AdminApp() {
       <div className="mx-auto w-full max-w-6xl flex-1 px-5 pb-28 pt-6 sm:px-8">
         {tab === 'home' && <AdminTrade switchTab={setTab} />}
         {tab === 'clients' && <AdminClients />}
-        {tab === 'mentors' && <AdminMentors />}
         {tab === 'mt5' && <AdminMt5 switchTab={setTab} />}
       </div>
 

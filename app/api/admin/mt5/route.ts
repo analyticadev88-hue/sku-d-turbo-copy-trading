@@ -71,15 +71,74 @@ export async function POST(request: Request) {
     return jsonError('Choose a supported Deriv MT5 server.', 400)
   }
 
+  const auth = {
+    Authorization: `Bearer ${config.key}`,
+    'Content-Type': 'application/json',
+  }
+
+  // This deployment has a single mentor: the admin's own connected MT5 account
+  // is the copy source. When the login is not on the bridge yet, register it
+  // as the mentor (the bridge provisions the account row as role='mentor' and
+  // launches its terminal). When it already exists, just refresh credentials;
+  // omitting `role` keeps the stored role so a mentor account is never demoted.
+  let existing = false
+  try {
+    const listResponse = await fetch(`${config.base}/v1/accounts`, {
+      headers: { Authorization: `Bearer ${config.key}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(8_000),
+    })
+    if (listResponse.ok) {
+      const listed = await listResponse.json().catch(() => null) as
+        | { accounts?: { login?: string }[] }
+        | null
+      existing = (listed?.accounts ?? []).some(
+        (account) => String(account?.login ?? '') === login,
+      )
+    }
+  } catch {
+    return jsonError('Could not reach the MT5 bridge. Please try again.', 502)
+  }
+
+  if (!existing) {
+    let mentorResponse: Response
+    try {
+      mentorResponse = await fetch(`${config.base}/v1/mentors`, {
+        method: 'POST',
+        headers: auth,
+        body: JSON.stringify({
+          mentor_id: process.env.SKUD_DEFAULT_MENTOR_ID || 'mentor-skud-01',
+          mentor_name: process.env.SKUD_DEFAULT_MENTOR_NAME || 'SkudTurbo',
+          login,
+          server,
+          password,
+        }),
+        cache: 'no-store',
+        signal: AbortSignal.timeout(20_000),
+      })
+    } catch {
+      return jsonError('Could not reach the MT5 bridge. Please try again.', 502)
+    }
+    const body = await mentorResponse.json().catch(() => null) as
+      | { error?: string; terminal?: string }
+      | null
+    if (!mentorResponse.ok) {
+      return jsonError(body?.error ?? 'The MT5 bridge could not register this mentor account.', mentorResponse.status || 502)
+    }
+    if (body?.terminal?.startsWith('failed')) {
+      return jsonError('The MT5 terminal could not be started. Check the bridge server.', 502)
+    }
+    return Response.json({ login, server, state: 'provisioning' }, {
+      headers: { 'Cache-Control': 'no-store' },
+    })
+  }
+
   let response: Response
   try {
     response = await fetch(`${config.base}/v1/accounts`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ login, password, server, mentor_id: '', role: 'student' }),
+      headers: auth,
+      body: JSON.stringify({ login, password, server }),
       cache: 'no-store',
       signal: AbortSignal.timeout(20_000),
     })
