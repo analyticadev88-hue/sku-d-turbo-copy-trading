@@ -259,6 +259,18 @@ def sync_chart_inputs(chart_path: Path, replacements: dict[str, str]) -> None:
             pass
 
 
+def _chart_profile_name(template_path: str) -> str:
+    """Chart profile folder a template belongs to, e.g. 'SkuD' or 'Mentor'.
+
+    The terminal is launched with /profile:<name> so MT5 always opens THIS
+    profile's charts instead of restoring whatever profile happened to be
+    active when the master terminal was last closed.
+    """
+    if not template_path:
+        return ""
+    return Path(template_path).parent.name or "Default"
+
+
 def sync_chart_token(chart_path: Path) -> None:
     """Force the EA token stored inside a student chart profile to the configured key."""
     token = os.environ.get("SKUD_EA_TOKEN") or os.environ.get("SKUD_BRIDGE_KEY") or ""
@@ -297,9 +309,14 @@ def ensure_terminal(account: dict) -> tuple[bool, str]:
         )
         if role == "mentor":
             _install_mentor_files(folder, account, warnings)
+            profile = _chart_profile_name(MENTOR_CHART_TEMPLATE)
         else:
             _install_student_files(folder, warnings)
-        subprocess.Popen([str(exe), "/portable", f"/config:{folder / 'startup.ini'}"], cwd=str(folder), close_fds=True)
+            profile = _chart_profile_name(CHART_TEMPLATE)
+        launch_args = [str(exe), "/portable", f"/config:{folder / 'startup.ini'}"]
+        if profile:
+            launch_args.append(f"/profile:{profile}")
+        subprocess.Popen(launch_args, cwd=str(folder), close_fds=True)
         return True, "; ".join(warnings) if warnings else "launched"
     except Exception as exc:
         return False, str(exc)[:200]
@@ -313,7 +330,7 @@ def _install_student_files(folder: Path, warnings: list[str]) -> None:
     else:
         warnings.append("EA source not configured; compile and copy the EA manually")
     if CHART_TEMPLATE and Path(CHART_TEMPLATE).exists():
-        charts = folder / "MQL5" / "Profiles" / "Charts" / "Default"
+        charts = folder / "MQL5" / "Profiles" / "Charts" / _chart_profile_name(CHART_TEMPLATE)
         charts.mkdir(parents=True, exist_ok=True)
         target_chart = charts / Path(CHART_TEMPLATE).name
         shutil.copy2(CHART_TEMPLATE, target_chart)
@@ -330,7 +347,7 @@ def _install_mentor_files(folder: Path, account: dict, warnings: list[str]) -> N
     else:
         warnings.append("mentor EA source not configured; compile and copy the Mentor EA manually")
     if MENTOR_CHART_TEMPLATE and Path(MENTOR_CHART_TEMPLATE).exists():
-        charts = folder / "MQL5" / "Profiles" / "Charts" / "Default"
+        charts = folder / "MQL5" / "Profiles" / "Charts" / _chart_profile_name(MENTOR_CHART_TEMPLATE)
         charts.mkdir(parents=True, exist_ok=True)
         target_chart = charts / Path(MENTOR_CHART_TEMPLATE).name
         shutil.copy2(MENTOR_CHART_TEMPLATE, target_chart)
@@ -345,3 +362,14 @@ def _install_mentor_files(folder: Path, account: dict, warnings: list[str]) -> N
         sync_chart_inputs(target_chart, replacements)
     else:
         warnings.append("mentor chart template not configured; attach the SkuD Mentor EA to a chart manually")
+
+
+def clear_account_charts(folder_path: str) -> None:
+    """Wipe saved chart profiles/workspaces from a managed slot.
+
+    Called when an account disconnects: MT5 otherwise restores the previous
+    account's chart and EA input settings on the next launch, so a new login
+    would inherit the old login's chart state. The next launch reinstalls a
+    fresh chart from the template anyway.
+    """
+    shutil.rmtree(Path(folder_path) / "MQL5" / "Profiles" / "Charts", ignore_errors=True)

@@ -122,11 +122,16 @@ password, and broker server. Do not add student credentials to the master
 profile.
 
 Chart profile convention: save the profile on the master terminal **once** with
-all Deriv charts the Student EA should report (the EA build 8.10 covers 30
-forex/metal symbols — all major EUR/GBP/USD/JPY/CHF/CAD/AUD/NZD crosses plus
-XAUUSD and XAGUSD; synthetics are excluded). Every cloned slot inherits that
-saved profile, and the bridge rewrites `EaToken` inside the copied `.chr` at
-launch, so the chart can never lock a terminal out with a stale token.
+all Deriv charts the Student EA should report (the EA covers 30 forex/metal
+symbols plus 19 synthetic indices by their MT5 full names). The bridge copies
+the chart into every slot under its own profile name (`Charts\SkuD` for
+students, `Charts\Mentor` for the mentor account) and launches MT5 with
+`/profile:<name>`, so each terminal deterministically opens the right chart —
+MT5 never restores whatever profile was last active in the master. The bridge
+rewrites `EaToken` / `MentorToken` inside the copied `.chr` at launch, so the
+chart can never lock a terminal out with a stale token. Disconnecting an
+account (bridge `…/deactivate`) stops the terminal **and** wipes the slot's
+saved charts, so the next login starts from a fresh template chart.
 
 ## 3. DNS, Caddy, and firewall
 

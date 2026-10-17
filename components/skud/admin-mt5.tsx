@@ -132,6 +132,8 @@ export function AdminMt5({ switchTab }: { switchTab: (tab: AdminTab) => void }) 
       window.localStorage.removeItem(STORAGE_KEY)
       setConnected(null)
       setStatus(null)
+      // Hard refresh so no stale account state survives the disconnect.
+      window.location.reload()
     } catch (disconnectError) {
       setError(disconnectError instanceof Error ? disconnectError.message : 'Could not disconnect this account.')
     } finally {

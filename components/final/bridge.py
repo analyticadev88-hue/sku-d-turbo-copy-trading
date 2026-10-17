@@ -1104,6 +1104,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 tm.stop_account_terminal(account["folder_path"])
             except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
                 return self._send(503, {"error": f"Could not stop this account's MT5 terminal: {error}"})
+            tm.clear_account_charts(account["folder_path"])
             with db_session() as db:
                 db.execute(
                     "UPDATE accounts SET is_active=0,updated_at=? WHERE login=?",
