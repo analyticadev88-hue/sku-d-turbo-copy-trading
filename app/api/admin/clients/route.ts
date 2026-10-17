@@ -14,7 +14,11 @@ export async function GET(request: Request) {
 
   try {
     const users = await prisma.user.findMany({
-      where: q ? { email: { contains: q, mode: 'insensitive' } } : {},
+      // Staff accounts (admins, mentors) are not clients and never carry a
+      // subscription; listing them here only causes "expired" confusion.
+      where: q
+        ? { email: { contains: q, mode: 'insensitive' }, isAdmin: false, mentorId: null }
+        : { isAdmin: false, mentorId: null },
       orderBy: { createdAt: 'desc' },
       take: 50,
       include: {

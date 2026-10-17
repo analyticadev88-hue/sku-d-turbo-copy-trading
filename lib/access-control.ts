@@ -31,7 +31,10 @@ export async function requireApprovedUser(request: Request) {
       },
     })
     const subscription = user?.subscriptions[0]
-    if (!user || user.accessStatus !== 'APPROVED' || !subscription) {
+    // Staff (admins and mentors) never pay: they always have access even
+    // without a subscription row.
+    const isStaff = Boolean(user?.isAdmin || user?.mentorId)
+    if (!user || user.accessStatus !== 'APPROVED' || (!subscription && !isStaff)) {
       return {
         error: Response.json(
           { error: 'Your account is awaiting mentor approval or its subscription has expired.' },
