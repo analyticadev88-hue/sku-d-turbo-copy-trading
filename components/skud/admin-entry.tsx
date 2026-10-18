@@ -20,7 +20,6 @@ function isInstalledPwa() {
 }
 
 export function AdminEntry() {
-  const router = useRouter()
   const [state, setState] = useState<EntryState>('loading')
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
 
@@ -29,33 +28,10 @@ export function AdminEntry() {
 
     const syncInstallPrompt = () => setInstallPrompt(installWindow.__skudInstallPrompt ?? null)
 
-    let active = true
-    async function checkSession() {
-      try {
-        const { data } = await getBrowserSupabase().auth.getSession()
-        if (!active) return
-        if (!isInstalledPwa()) {
-          setState('install')
-          return
-        }
-        if (data.session) {
-          router.replace('/dashboard')
-          return
-        }
-        setState('login')
-      } catch {
-        if (active) setState(isInstalledPwa() ? 'login' : 'install')
-      }
-    }
-    void checkSession()
-
+    // The admin must always sign in on app open — never skip the login
+    // screen because a session from a previous open is still stored.
     const syncInstallState = () => {
-      if (!isInstalledPwa()) {
-        setState('install')
-        return
-      }
-      setState((current) => (current === 'install' ? 'loading' : current))
-      void checkSession()
+      setState(isInstalledPwa() ? 'login' : 'install')
     }
 
     window.addEventListener('skud-install-available', syncInstallPrompt)
@@ -66,12 +42,12 @@ export function AdminEntry() {
     window.matchMedia('(display-mode: standalone)').addEventListener('change', syncInstallState)
 
     syncInstallPrompt()
+    syncInstallState()
 
     return () => {
-      active = false
       window.removeEventListener('skud-install-available', syncInstallPrompt)
     }
-  }, [router])
+  }, [])
 
   if (state === 'install') {
     return <InstallScreen installPrompt={installPrompt} />
