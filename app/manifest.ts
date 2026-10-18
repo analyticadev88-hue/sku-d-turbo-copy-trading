@@ -3,9 +3,9 @@ import type { MetadataRoute } from 'next'
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: '/',
-    name: 'Synthyard EA Hosting',
-    short_name: 'Synthyard',
-    description: 'Managed Expert Advisor hosting and trading account access.',
+    name: 'SkuD Turbo Admin',
+    short_name: 'SkuD Admin',
+    description: 'Admin platform for managing SkuD Turbo clients, mentors and MT5 accounts.',
     start_url: '/dashboard',
     scope: '/',
     display: 'standalone',

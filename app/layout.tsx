@@ -10,9 +10,8 @@ const jakarta = Plus_Jakarta_Sans({
 })
 
 export const metadata: Metadata = {
-  title: 'SkuD Turbo — High-Performance Forex Trading Robot',
-  description:
-    'SkuD Turbo is the automated forex trading robot by Skud, a forex pioneer. Connect your Deriv MT5 account and let Turbo trade his strategy.',
+  title: 'SkuD Turbo Admin',
+  description: 'Admin platform for managing SkuD Turbo clients, mentors and MT5 accounts.',
   generator: 'v0.app',
   applicationName: 'SkuD Turbo',
   appleWebApp: {
