@@ -3,10 +3,12 @@ import { Ticker } from '@/components/home/ticker'
 import { Founder } from '@/components/home/founder'
 import { Robot } from '@/components/home/robot'
 import { DerivLogo } from '@/components/skud/deriv-logo'
+import { AdminHomeGate } from '@/components/skud/admin-home-gate'
 
 export default function HomePage() {
   return (
-    <>
+    <AdminHomeGate>
+      <>
       <main>
         <Hero />
         <Ticker />
@@ -26,6 +28,7 @@ export default function HomePage() {
           with money you can afford to lose.
         </p>
       </footer>
-    </>
+      </>
+    </AdminHomeGate>
   )
 }
