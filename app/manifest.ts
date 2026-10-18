@@ -6,7 +6,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: 'SkuD Turbo Admin',
     short_name: 'SkuD Admin',
     description: 'Admin platform for managing SkuD Turbo clients, mentors and MT5 accounts.',
-    start_url: '/dashboard',
+    start_url: '/',
     scope: '/',
     display: 'standalone',
     orientation: 'portrait',
@@ -22,7 +22,7 @@ export default function manifest(): MetadataRoute.Manifest {
       {
         name: 'Dashboard',
         short_name: 'Dashboard',
-        url: '/dashboard',
+        url: '/',
         icons: [{ src: '/icons/icon-192.png', sizes: '192x192' }],
       },
     ],

@@ -22,6 +22,26 @@ export function AdminApp() {
   const [tab, setTab] = useState<AdminTab>('home')
   const [installed, setInstalled] = useState<boolean | null>(null)
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
+  const [signedIn, setSignedIn] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let active = true
+    async function checkSession() {
+      try {
+        const { data } = await getBrowserSupabase().auth.getSession()
+        if (!active) return
+        if (!data.session) {
+          window.location.replace('/')
+          return
+        }
+        setSignedIn(true)
+      } catch {
+        if (active) window.location.replace('/')
+      }
+    }
+    void checkSession()
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     const installWindow = window as Window & { __skudInstallPrompt?: BeforeInstallPromptEvent }
@@ -42,7 +62,7 @@ export function AdminApp() {
     }
   }, [])
 
-  if (installed === null) {
+  if (installed === null || signedIn === null) {
     return <main className="grid min-h-dvh place-items-center bg-[#0b0b0d] text-sm text-white/55">Loading admin app…</main>
   }
 
@@ -118,7 +138,7 @@ export function AdminApp() {
           type="button"
           onClick={async () => {
             await getBrowserSupabase().auth.signOut()
-            window.location.assign('/dashboard?login=1')
+            window.location.assign('/')
           }}
           className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/55 transition-colors hover:text-white"
         >
