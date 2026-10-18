@@ -3,8 +3,56 @@ import { requireAdmin } from '@/lib/admin-guard'
 
 type BridgeAccount = { login?: unknown; server?: unknown; is_active?: unknown }
 
+type VolumeSpecs = { min: number; max: number; step: number }
+
 function jsonError(error: string, status: number) {
   return Response.json({ error }, { status, headers: { 'Cache-Control': 'no-store' } })
+}
+
+function clampVolume(raw: number, min: number, max: number, step: number): number {
+  if (!Number.isFinite(raw)) return min
+  const clamped = Math.min(max, Math.max(min, raw))
+  const snapped = min + Math.round((clamped - min) / step) * step
+  const fixed = Math.max(2, Math.ceil(-Math.log10(step)))
+  return Number((Math.min(max, Math.max(min, snapped))).toFixed(fixed))
+}
+
+async function fetchVolumeSpecs(
+  bridgeUrl: string,
+  bridgeKey: string,
+  login: string,
+  symbol: string,
+): Promise<VolumeSpecs | null> {
+  if (!/^\d{4,20}$/.test(login) || !symbol) return null
+  try {
+    const response = await fetch(
+      `${bridgeUrl.replace(/\/$/, '')}/v1/prices?login=${encodeURIComponent(login)}`,
+      {
+        headers: { Authorization: `Bearer ${bridgeKey}` },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(10_000),
+      },
+    )
+    if (!response.ok) return null
+    const body = await response.json().catch(() => null) as
+      | { prices?: unknown }
+      | unknown[]
+      | null
+    const rows = (Array.isArray(body)
+      ? body
+      : body && typeof body === 'object' && Array.isArray((body as { prices?: unknown[] }).prices)
+        ? (body as { prices?: unknown[] }).prices!
+        : null) as { symbol?: unknown; volume_min?: unknown; volume_max?: unknown; volume_step?: unknown }[] | null
+    if (!rows) return null
+    const match = rows.find((row) => String(row.symbol ?? '').toUpperCase() === symbol.toUpperCase())
+    const min = Number(match?.volume_min)
+    const max = Number(match?.volume_max)
+    const step = Number(match?.volume_step)
+    if (!match || !Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(step) || step <= 0) return null
+    return { min, max, step }
+  } catch {
+    return null
+  }
 }
 
 async function fetchBridgeAccounts(): Promise<{ accounts: BridgeAccount[] } | { error: string }> {
@@ -129,11 +177,25 @@ export async function POST(request: Request) {
     return jsonError('No active client accounts on the bridge.', 422)
   }
 
+  // Snap the volume to the symbol's real specs (from the broker via the
+  // bridge) so an invalid step can never reach the terminals. Specs are
+  // read from the admin's own account when connected, otherwise from the
+  // first active account; if they cannot be read, the generic bounds above
+  // still applied.
+  const specAccount = activeAccounts.find((account) => String(account.login ?? '') === mirrorLogin) ?? activeAccounts[0]
+  const specs = await fetchVolumeSpecs(
+    bridgeUrl,
+    bridgeKey,
+    String(specAccount?.login ?? ''),
+    symbol,
+  )
+  const orderVolume = specs ? clampVolume(volume, specs.min, specs.max, specs.step) : volume
+
   const broadcastAccounts = activeAccounts.filter((account) => String(account.login ?? '') !== mirrorLogin)
   const order = {
     symbol,
     order_type: side === 'BUY' ? 'MARKET_BUY' : 'MARKET_SELL',
-    volume,
+    volume: orderVolume,
     tp_enabled: tpEnabled,
     tp_distance: tpDistance,
     sl_enabled: slEnabled,
@@ -200,7 +262,7 @@ export async function POST(request: Request) {
   }
 
   return Response.json(
-    { results, count: results.length },
+    { results, count: results.length, volume: orderVolume },
     { headers: { 'Cache-Control': 'no-store' } },
   )
 }

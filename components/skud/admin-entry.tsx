@@ -28,7 +28,35 @@ export function AdminEntry() {
     const installWindow = window as Window & { __skudInstallPrompt?: BeforeInstallPromptEvent }
 
     const syncInstallPrompt = () => setInstallPrompt(installWindow.__skudInstallPrompt ?? null)
-    const syncInstallState = () => setState(isInstalledPwa() ? 'login' : 'install')
+
+    let active = true
+    async function checkSession() {
+      try {
+        const { data } = await getBrowserSupabase().auth.getSession()
+        if (!active) return
+        if (!isInstalledPwa()) {
+          setState('install')
+          return
+        }
+        if (data.session) {
+          router.replace('/dashboard')
+          return
+        }
+        setState('login')
+      } catch {
+        if (active) setState(isInstalledPwa() ? 'login' : 'install')
+      }
+    }
+    void checkSession()
+
+    const syncInstallState = () => {
+      if (!isInstalledPwa()) {
+        setState('install')
+        return
+      }
+      setState((current) => (current === 'install' ? 'loading' : current))
+      void checkSession()
+    }
 
     window.addEventListener('skud-install-available', syncInstallPrompt)
     window.addEventListener('appinstalled', () => {
@@ -38,23 +66,6 @@ export function AdminEntry() {
     window.matchMedia('(display-mode: standalone)').addEventListener('change', syncInstallState)
 
     syncInstallPrompt()
-    syncInstallState()
-
-    let active = true
-    async function checkSession() {
-      try {
-        const { data } = await getBrowserSupabase().auth.getSession()
-        if (!active) return
-        if (data.session) {
-          router.replace('/dashboard')
-          return
-        }
-        setState('login')
-      } catch {
-        if (active) setState('login')
-      }
-    }
-    void checkSession()
 
     return () => {
       active = false
