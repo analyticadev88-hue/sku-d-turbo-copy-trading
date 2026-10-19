@@ -81,7 +81,9 @@ export function Mt5ConnectDialog({
             <DialogHeader>
               <DialogTitle className="text-xl font-extrabold">Connect an MT5 account</DialogTitle>
               <DialogDescription className="text-white/55">
-                The server sends your MT5 credentials to the managed bridge. Your password is not returned to the browser or displayed in the dashboard.
+                Your credentials go straight to the Synthyard bridge over an encrypted connection. Your
+                mentor never sees your MT5 login or password, and they are never stored in this app or
+                displayed in the dashboard.
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleAccountSubmit} className="flex flex-col gap-4">

@@ -5,6 +5,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { getBrowserSupabase } from '@/lib/supabase'
 import { DerivMark } from './deriv-logo'
+import { SynthyardCheckoutDialog } from './synthyard-checkout'
 
 type AccessStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'payment_required'
 
@@ -26,8 +27,7 @@ export function AccessFlow({
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
-  const [checkoutError, setCheckoutError] = useState<string | null>(null)
-  const [isStartingCheckout, setIsStartingCheckout] = useState(false)
+  const [checkoutOpen, setCheckoutOpen] = useState(false)
 
   async function checkPayment() {
     if (!orderId) return
@@ -121,27 +121,6 @@ export function AccessFlow({
     void linkPaidOrder()
     return () => { active = false }
   }, [orderId, paymentStatus])
-
-  async function startCheckout() {
-    setCheckoutError(null)
-    setIsStartingCheckout(true)
-
-    try {
-      const response = await fetch('/api/payments/create', { method: 'POST' })
-      const result = (await response.json()) as { invoiceUrl?: string; orderId?: string; error?: string }
-      if (!response.ok || !result.invoiceUrl) {
-        throw new Error(result.error ?? 'Could not start checkout. Please try again.')
-      }
-
-      if (result.orderId) window.localStorage.setItem('skud-payment-order', result.orderId)
-      window.location.assign(result.invoiceUrl)
-    } catch (error) {
-      setCheckoutError(
-        error instanceof Error ? error.message : 'Could not start checkout. Please try again.',
-      )
-      setIsStartingCheckout(false)
-    }
-  }
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -324,23 +303,18 @@ export function AccessFlow({
         />
         <DerivMark className="size-12 rounded-xl text-2xl" />
         <p className="mt-5 text-xs font-extrabold uppercase tracking-[0.25em] text-primary">SkuD Turbo</p>
-        <h1 className="mt-4 text-2xl font-extrabold">Complete your setup payment</h1>
+        <h1 className="mt-4 text-2xl font-extrabold">Complete your setup</h1>
         <p className="mt-3 max-w-sm text-sm leading-relaxed text-white/55">
-          Your account is ready. Pay the one-time $13 setup fee so a mentor can approve your access.
+          Your account is ready. Pay the one-time $13 USD server setup fee to Synthyard, then a mentor
+          can approve your access.
         </p>
         <button
           type="button"
-          onClick={() => void startCheckout()}
-          disabled={isStartingCheckout}
-          className="mt-6 inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-5 text-sm font-extrabold text-white transition-colors hover:bg-primary/85 disabled:cursor-wait disabled:opacity-60"
+          onClick={() => setCheckoutOpen(true)}
+          className="mt-6 inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-primary px-5 text-sm font-extrabold text-white transition-colors hover:bg-primary/85"
         >
-          {isStartingCheckout ? 'Preparing secure checkout...' : 'Continue to payment — $13'}
+          Review Synthyard payment
         </button>
-        {checkoutError ? (
-          <p role="alert" className="mt-4 max-w-sm rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-xs leading-relaxed text-white/80">
-            {checkoutError}
-          </p>
-        ) : null}
         <button
           type="button"
           onClick={async () => {
@@ -351,6 +325,7 @@ export function AccessFlow({
         >
           Sign out
         </button>
+        <SynthyardCheckoutDialog open={checkoutOpen} onOpenChange={setCheckoutOpen} />
       </main>
     )
   }
