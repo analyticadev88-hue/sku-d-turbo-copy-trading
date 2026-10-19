@@ -7,6 +7,7 @@ import { AccessStart } from './access-start'
 import { Dashboard } from './dashboard'
 import { GetStarted } from './get-started'
 import { InstallRequired } from './install-required'
+import { clearClientSessionId, loadClientSessionId } from './client-session'
 import { loadStoredAccount, type StoredMt5Account } from './mt5-session'
 import { usePwaInstall } from '@/components/pwa/use-pwa-install'
 import { getBrowserSupabase } from '@/lib/supabase'
@@ -24,7 +25,36 @@ function AccessSplash() {
 
 const PAYMENT_ORDER_KEY = 'skud-payment-order'
 
-type AccessState = 'pending' | 'approved' | 'rejected' | 'expired' | 'payment_required' | 'error'
+type AccessState = 'pending' | 'approved' | 'rejected' | 'expired' | 'payment_required' | 'superseded' | 'error'
+
+function SignedOutElsewhere() {
+  return (
+    <main className="relative isolate flex min-h-dvh flex-col items-center justify-center gap-4 overflow-hidden bg-[#0b0b0d] px-5 text-center text-white">
+      <div
+        className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_80%_15%,rgba(255,68,79,0.12),transparent_48%)]"
+        aria-hidden="true"
+      />
+      <Image src="/logo-synth.webp" alt="SkuD Turbo" width={72} height={72} priority className="size-16 rounded-2xl object-cover" />
+      <p className="text-xs font-extrabold uppercase tracking-[0.25em] text-white/75">SkuD Turbo</p>
+      <h1 className="mt-2 text-2xl font-extrabold">Signed in on another device</h1>
+      <p className="max-w-sm text-sm leading-relaxed text-white/55">
+        This account was used to sign in somewhere else. For your security, only one device can be
+        active at a time.
+      </p>
+      <button
+        type="button"
+        onClick={async () => {
+          clearClientSessionId()
+          await getBrowserSupabase().auth.signOut()
+          window.location.assign('/dashboard?login=1')
+        }}
+        className="mt-3 inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-5 text-sm font-extrabold text-white transition-colors hover:bg-primary/85"
+      >
+        Sign in again
+      </button>
+    </main>
+  )
+}
 
 export function AccessGate({ preview, checkout, login }: { preview: boolean; checkout?: string; login?: boolean }) {
   const [access, setAccess] = useState<AccessState | null | undefined>(undefined)
@@ -52,7 +82,10 @@ export function AccessGate({ preview, checkout, login }: { preview: boolean; che
         }
 
         const response = await fetch('/api/access', {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'x-session-id': loadClientSessionId() ?? '',
+          },
           cache: 'no-store',
         })
         const result = await response.json() as { status?: AccessState; error?: string }
@@ -74,6 +107,8 @@ export function AccessGate({ preview, checkout, login }: { preview: boolean; che
   if (installed === undefined || access === undefined) return <AccessSplash />
 
   if (!installed && checkout !== 'returned') return <InstallRequired />
+
+  if (access === 'superseded') return <SignedOutElsewhere />
 
   if (access === 'error') {
     return (

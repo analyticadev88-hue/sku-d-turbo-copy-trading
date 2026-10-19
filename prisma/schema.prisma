@@ -27,13 +27,16 @@ enum PaymentStatus {
 }
 
 model User {
-  id            String         @id @db.Uuid
-  email         String         @unique
-  accessStatus  AccessStatus   @default(PENDING)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  subscriptions Subscription[]
-  payments      PaymentOrder[]
+  id              String         @id @db.Uuid
+  email           String         @unique
+  accessStatus    AccessStatus   @default(PENDING)
+  activeSessionId String?
+  isAdmin         Boolean        @default(false)
+  mentorId        String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  subscriptions   Subscription[]
+  payments        PaymentOrder[]
 
   @@index([accessStatus, createdAt])
 }

@@ -1,5 +1,12 @@
+import { timingSafeEqual } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import { getSupabaseUser } from '@/lib/supabase'
+
+export function sessionIdMatches(provided: string, active: string) {
+  const providedBytes = Buffer.from(provided)
+  const activeBytes = Buffer.from(active)
+  return providedBytes.length === activeBytes.length && timingSafeEqual(providedBytes, activeBytes)
+}
 
 export async function requireApprovedUser(request: Request) {
   const accessToken = request.headers.get('x-supabase-access-token') ?? ''
@@ -30,6 +37,15 @@ export async function requireApprovedUser(request: Request) {
         },
       },
     })
+    const clientSessionId = request.headers.get('x-session-id') ?? ''
+    if (user?.activeSessionId && !sessionIdMatches(clientSessionId, user.activeSessionId)) {
+      return {
+        error: Response.json(
+          { error: 'This account signed in on another device.' },
+          { status: 401 },
+        ),
+      } as const
+    }
     const subscription = user?.subscriptions[0]
     if (!user || user.accessStatus !== 'APPROVED' || !subscription) {
       return {

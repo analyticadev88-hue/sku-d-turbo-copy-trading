@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { getBrowserSupabase } from '@/lib/supabase'
 import { DERIV_SERVERS } from '@/lib/mt5-servers'
 import { saveStoredAccount } from './mt5-session'
+import { loadClientSessionId } from './client-session'
 
 export function Mt5ConnectDialog({
   open,
@@ -48,6 +49,7 @@ export function Mt5ConnectDialog({
         headers: {
           'Content-Type': 'application/json',
           'x-supabase-access-token': accessToken,
+          'x-session-id': loadClientSessionId() ?? '',
         },
         body: JSON.stringify({ login, password, server }),
       })

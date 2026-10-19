@@ -17,10 +17,25 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { clearStoredAccount, loadStoredAccount } from './mt5-session'
+import { clearClientSessionId, loadClientSessionId } from './client-session'
 import { DerivMark } from './deriv-logo'
 import { Mt5ConnectDialog } from './mt5-connect'
 
 const DEFAULT_MENTOR_ID = 'SkudTurbo'
+
+function firstNameFromEmail(email: string | null) {
+  if (!email) return ''
+  const local = email.split('@')[0] ?? ''
+  const raw = (local.split(/[._\-+]/)[0] ?? '').replace(/[^a-zA-Z]/g, '')
+  if (!raw) return ''
+  return raw.charAt(0).toUpperCase() + raw.slice(1)
+}
+
+function greetingForHour(hour: number) {
+  if (hour < 12) return 'Good morning'
+  if (hour < 17) return 'Good afternoon'
+  return 'Good evening'
+}
 
 type DashboardProps = { preview?: boolean }
 type Tab = 'home' | 'profile'
@@ -40,6 +55,19 @@ export function Dashboard({ preview = false }: DashboardProps) {
   const [liveStatus, setLiveStatus] = useState<Mt5Status | null>(null)
   const [accountDialogOpen, setAccountDialogOpen] = useState(false)
   const [accountSheetOpen, setAccountSheetOpen] = useState(false)
+  const [userEmail, setUserEmail] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (preview) return
+    let active = true
+    getBrowserSupabase().auth.getUser().then(({ data }) => {
+      if (active) setUserEmail(data.user?.email ?? null)
+    }).catch(() => {})
+    return () => { active = false }
+  }, [preview])
+
+  const greeting = greetingForHour(new Date().getHours())
+  const firstName = preview ? 'Skud' : firstNameFromEmail(userEmail)
 
   useEffect(() => {
     if (preview) return
@@ -67,6 +95,7 @@ export function Dashboard({ preview = false }: DashboardProps) {
           headers: {
             Authorization: `Bearer ${account.statusToken}`,
             'x-supabase-access-token': accessToken,
+            'x-session-id': loadClientSessionId() ?? '',
           },
           cache: 'no-store',
         })
@@ -102,6 +131,7 @@ export function Dashboard({ preview = false }: DashboardProps) {
           headers: {
             Authorization: `Bearer ${account.statusToken}`,
             ...(accessToken ? { 'x-supabase-access-token': accessToken } : {}),
+            'x-session-id': loadClientSessionId() ?? '',
           },
         })
       } catch {
@@ -117,6 +147,7 @@ export function Dashboard({ preview = false }: DashboardProps) {
 
   async function signOutOfApp() {
     await signOut()
+    clearClientSessionId()
     await getBrowserSupabase().auth.signOut()
     window.location.assign('/dashboard?login=1')
   }
@@ -143,12 +174,14 @@ export function Dashboard({ preview = false }: DashboardProps) {
           liveAccount={liveAccount}
           liveStatus={liveStatus}
           mentorId={mentorId}
+          greeting={greeting}
+          firstName={firstName}
           onConnect={openAccountDialog}
           onSignOut={signOut}
           onAccountDetails={() => setAccountSheetOpen(true)}
         />
       ) : (
-        <ProfileView preview={preview} mentorId={mentorId} onSignOut={signOutOfApp} />
+        <ProfileView preview={preview} mentorId={mentorId} firstName={firstName} userEmail={userEmail} onSignOut={signOutOfApp} />
       )}
 
       <nav
@@ -234,6 +267,8 @@ function HomeView({
   liveAccount,
   liveStatus,
   mentorId,
+  greeting,
+  firstName,
   onConnect,
   onSignOut,
   onAccountDetails,
@@ -243,6 +278,8 @@ function HomeView({
   liveAccount: LiveMt5Account | null
   liveStatus: Mt5Status | null
   mentorId: string
+  greeting: string
+  firstName: string
   onConnect: () => void
   onSignOut: () => void
   onAccountDetails: () => void
@@ -267,7 +304,10 @@ function HomeView({
         </div>
         <div className="relative z-10 mt-auto max-w-[82%] pb-1 sm:max-w-[65%]">
           <p className="text-[9px] font-extrabold uppercase tracking-[0.2em] text-[#ffc4cd]">MT5 account</p>
-          <h1 className="mt-2 text-balance text-3xl font-extrabold uppercase leading-[0.96] sm:text-5xl">Good morning,<br />Skud.</h1>
+          <h1 className="mt-2 text-balance text-3xl font-extrabold uppercase leading-[0.96] sm:text-5xl">
+            {firstName ? `${greeting},` : `${greeting}.`}
+            {firstName ? (<><br />{firstName}.</>) : null}
+          </h1>
         </div>
       </section>
 
@@ -309,16 +349,20 @@ function HomeView({
   )
 }
 
-function ProfileView({ preview, mentorId, onSignOut }: { preview: boolean; mentorId: string; onSignOut: () => void }) {
+function ProfileView({ preview, mentorId, firstName, userEmail, onSignOut }: { preview: boolean; mentorId: string; firstName: string; userEmail: string | null; onSignOut: () => void }) {
+  const displayName = preview ? 'Skud Student' : firstName || 'SkuD Turbo member'
+  const displayEmail = preview ? 'student@example.com' : userEmail ?? 'Not available'
+  const initials = (preview ? 'SS' : firstName || 'ST').slice(0, 2).toUpperCase()
+
   return (
     <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-6 px-4 pt-5 sm:px-6">
       <section className="flex items-center gap-4 border-b border-border pb-6">
         <div className="flex size-16 items-center justify-center rounded-full bg-[#d8ede6] text-xl font-extrabold text-[#176b58]">
-          SS
+          {initials}
         </div>
         <div className="min-w-0">
-          <h2 className="text-xl font-extrabold">Skud Student</h2>
-          <p className="mt-1 break-all text-sm text-muted-foreground">student@example.com</p>
+          <h2 className="text-xl font-extrabold">{displayName}</h2>
+          <p className="mt-1 break-all text-sm text-muted-foreground">{displayEmail}</p>
           {preview && <p className="mt-1 text-[9px] font-bold uppercase tracking-[0.13em] text-primary">Preview profile</p>}
         </div>
       </section>
@@ -337,8 +381,8 @@ function ProfileView({ preview, mentorId, onSignOut }: { preview: boolean; mento
       <section aria-labelledby="profile-details" className="flex flex-col gap-3">
         <h2 id="profile-details" className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-muted-foreground">Personal details</h2>
         <dl className="divide-y divide-border border-y border-border text-sm">
-          <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 py-3"><dt className="text-muted-foreground">Full name</dt><dd className="break-all text-right font-semibold">Skud Student</dd></div>
-          <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 py-3"><dt className="text-muted-foreground">Email</dt><dd className="min-w-0 max-w-full break-all text-right font-semibold">student@example.com</dd></div>
+          <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 py-3"><dt className="text-muted-foreground">Full name</dt><dd className="break-all text-right font-semibold">{displayName}</dd></div>
+          <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 py-3"><dt className="text-muted-foreground">Email</dt><dd className="min-w-0 max-w-full break-all text-right font-semibold">{displayEmail}</dd></div>
           <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 py-3"><dt className="text-muted-foreground">Following</dt><dd className="break-all text-right font-semibold">SkudTurbo</dd></div>
         </dl>
       </section>

@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { sessionIdMatches } from '@/lib/access-control'
 import { getSupabaseUser } from '@/lib/supabase'
 
 function jsonError(error: string, status: number) {
@@ -12,7 +13,7 @@ async function getAuthUser(request: Request) {
   return getSupabaseUser(token)
 }
 
-async function accessState(userId: string) {
+async function accessState(userId: string, clientSessionId = '') {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     include: {
@@ -24,6 +25,9 @@ async function accessState(userId: string) {
     },
   })
   if (!user) return { status: 'payment_required' as const }
+  if (user.activeSessionId && !sessionIdMatches(clientSessionId, user.activeSessionId)) {
+    return { status: 'superseded' as const }
+  }
 
   const subscription = user.subscriptions[0]
   if (user.accessStatus === 'APPROVED' && subscription) {
@@ -41,7 +45,7 @@ export async function GET(request: Request) {
   try {
     const authUser = await getAuthUser(request)
     if (!authUser) return jsonError('Sign in with a valid Supabase account.', 401)
-    const state = await accessState(authUser.id)
+    const state = await accessState(authUser.id, request.headers.get('x-session-id') ?? '')
     return Response.json(state, { headers: { 'Cache-Control': 'no-store' } })
   } catch {
     return jsonError('Could not verify your account access.', 503)
@@ -96,7 +100,7 @@ export async function POST(request: Request) {
       if (claimed.count !== 1) throw new Error('Payment is already linked to another account.')
     })
 
-    const state = await accessState(authUser.id)
+    const state = await accessState(authUser.id, request.headers.get('x-session-id') ?? '')
     return Response.json(
       state.status === 'expired' ? { status: 'pending' } : state,
       {

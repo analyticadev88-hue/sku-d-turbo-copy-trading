@@ -6,8 +6,9 @@ import { Eye, EyeOff } from 'lucide-react'
 import { getBrowserSupabase } from '@/lib/supabase'
 import { DerivMark } from './deriv-logo'
 import { SynthyardCheckoutDialog } from './synthyard-checkout'
+import { clearClientSessionId, loadClientSessionId, saveClientSessionId } from './client-session'
 
-type AccessStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'payment_required'
+type AccessStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'payment_required' | 'superseded'
 
 export function AccessFlow({
   orderId,
@@ -101,6 +102,7 @@ export function AccessFlow({
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
+            'x-session-id': loadClientSessionId() ?? '',
           },
           body: JSON.stringify({ orderId }),
         })
@@ -110,6 +112,9 @@ export function AccessFlow({
         window.localStorage.removeItem('skud-payment-order')
         setAccessStatus(result.status ?? null)
         setExpiresAt(result.expiresAt ?? null)
+        if (result.status === 'superseded') {
+          setMessage('This account is active on another device. Sign in again to continue.')
+        }
         if (result.status === 'pending') {
           setMessage('Payment linked. A mentor must approve your subscription before you can enter the app.')
         }
@@ -148,15 +153,31 @@ export function AccessFlow({
         return
       }
 
+      // Mint the single active session for this device before checking access.
+      try {
+        const sessionResponse = await fetch('/api/session', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        })
+        const sessionResult = await sessionResponse.json() as { sessionId?: string }
+        if (sessionResponse.ok && sessionResult.sessionId) saveClientSessionId(sessionResult.sessionId)
+      } catch {
+        // Best-effort: enforcement starts on the next successful mint.
+      }
+
       const response = await fetch('/api/access', orderId ? {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
+          'x-session-id': loadClientSessionId() ?? '',
         },
         body: JSON.stringify({ orderId }),
       } : {
-        headers: { Authorization: `Bearer ${session.access_token}` },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'x-session-id': loadClientSessionId() ?? '',
+        },
         cache: 'no-store',
       })
       const access = await response.json() as {
@@ -164,12 +185,22 @@ export function AccessFlow({
         expiresAt?: string
         error?: string
       }
+      if (access.status === 'superseded') throw new Error('This account is active on another device. Please sign in again.')
       if (!response.ok) throw new Error(access.error ?? 'Could not register your account.')
       window.localStorage.removeItem('skud-payment-order')
       setAccessStatus(access.status)
-      if (access.status === 'approved') setExpiresAt(access.expiresAt ?? null)
+      if (access.status === 'approved') {
+        setExpiresAt(access.expiresAt ?? null)
+        window.setTimeout(() => window.location.assign('/dashboard'), 1200)
+      }
       if (access.status === 'pending') {
         setMessage('Your payment is confirmed. A mentor must approve your account before you can enter SkuD Turbo.')
+      }
+      // Single active session per account: end every other signed-in device.
+      try {
+        await supabase.auth.signOut({ scope: 'others' })
+      } catch {
+        // Best-effort: another device's token then expires on its own.
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not complete account access.')
@@ -190,13 +221,22 @@ export function AccessFlow({
         return
       }
       const response = await fetch('/api/access', {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'x-session-id': loadClientSessionId() ?? '',
+        },
         cache: 'no-store',
       })
       const access = await response.json() as { status?: AccessStatus; expiresAt?: string; error?: string }
       if (!response.ok) throw new Error(access.error ?? 'Could not check approval status.')
       setAccessStatus(access.status ?? null)
       setExpiresAt(access.expiresAt ?? null)
+      if (access.status === 'superseded') {
+        setMessage('This account is active on another device. Sign in again to continue.')
+      }
+      if (access.status === 'approved') {
+        window.setTimeout(() => window.location.assign('/dashboard'), 1200)
+      }
       if (access.status === 'payment_required') setMessage('No paid setup is linked to this account yet.')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not check approval status.')
@@ -216,7 +256,7 @@ export function AccessFlow({
         <p className="mt-3 max-w-sm text-sm leading-relaxed text-white/55">
           {paymentStatus === 'failed'
             ? 'This payment did not complete. Return to the access page and try again.'
-            : 'We will show SkuD Turbo account setup after the payment provider confirms your payment.'}
+            : 'As soon as Synthyard confirms your payment, your account is registered for mentor approval.'}
         </p>
         {message && <p role="status" className="mt-4 max-w-sm text-xs text-white/45">{message}</p>}
         {paymentStatus === 'pending' && (
@@ -259,6 +299,7 @@ export function AccessFlow({
           <button
             type="button"
             onClick={async () => {
+              clearClientSessionId()
               await getBrowserSupabase().auth.signOut()
               window.location.assign('/dashboard?login=1')
             }}
@@ -318,6 +359,7 @@ export function AccessFlow({
         <button
           type="button"
           onClick={async () => {
+            clearClientSessionId()
             await getBrowserSupabase().auth.signOut()
             window.location.assign('/dashboard')
           }}
