@@ -61,7 +61,7 @@ export async function POST(request: Request) {
         price_amount: SETUP_PRICE_AMOUNT,
         price_currency: SETUP_PRICE_CURRENCY,
         order_id: orderId,
-        order_description: 'Synthyard EA hosting and Germany MT5 server setup',
+        order_description: 'SkuD Turbo EA hosting and Germany MT5 server setup',
         success_url: new URL(
           `/dashboard?checkout=returned&order_id=${encodeURIComponent(orderId)}`,
           appBase,

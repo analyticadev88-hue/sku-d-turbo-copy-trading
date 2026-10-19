@@ -229,8 +229,8 @@ export function AccessFlow({
   if (paymentStatus !== 'paid') {
     return (
       <main className="flex min-h-dvh flex-col items-center justify-center bg-[#0b0b0d] px-5 text-center text-white">
-        <Image src="/logo-synth.webp" alt="Synthyard EA Hosting" width={72} height={72} priority className="size-16 rounded-2xl object-cover" />
-        <p className="mt-5 text-xs font-extrabold uppercase tracking-[0.25em] text-white/75">Synthyard EA Hosting</p>
+        <Image src="/logo-synth.webp" alt="SkuD Turbo" width={72} height={72} priority className="size-16 rounded-2xl object-cover" />
+        <p className="mt-5 text-xs font-extrabold uppercase tracking-[0.25em] text-white/75">SkuD Turbo</p>
         <h1 className="mt-6 text-2xl font-bold">
           {paymentStatus === 'failed' ? 'Payment not completed' : 'Confirming your payment'}
         </h1>

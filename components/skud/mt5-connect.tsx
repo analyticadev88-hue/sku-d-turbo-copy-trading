@@ -128,7 +128,7 @@ export function Mt5ConnectDialog({
                   name="server"
                   required
                   defaultValue=""
-                  className="h-11 w-full rounded-md border border-white/15 bg-[#1a1a1e] px-3 text-sm text-white outline-none focus-visible:border-primary focus-visible:ring-3 focus-visible:ring-ring/50"
+                  className="h-11 w-full rounded-md border border-white/15 bg-[#1a1a1e] px-3 text-white outline-none focus-visible:border-primary focus-visible:ring-3 focus-visible:ring-ring/50"
                 >
                   <option value="" disabled>
                     Choose your server

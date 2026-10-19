@@ -13,11 +13,11 @@ export function InstallRequired() {
       />
 
       <header className="mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-5 sm:px-8 sm:py-7">
-        <Link href="/" aria-label="Synthyard EA Hosting home" className="inline-flex items-center gap-3">
+        <Link href="/" aria-label="SkuD Turbo home" className="inline-flex items-center gap-3">
           <Image src="/logo-synth.webp" alt="" width={44} height={44} className="size-10 rounded-xl object-cover" />
           <span className="flex flex-col gap-1">
-            <span className="text-sm font-extrabold uppercase leading-none text-white">Synthyard</span>
-            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/65">EA Hosting</span>
+            <span className="text-sm font-extrabold uppercase leading-none text-white">SkuD</span>
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/65">Turbo</span>
           </span>
         </Link>
         <Link
@@ -31,13 +31,13 @@ export function InstallRequired() {
       <section className="mx-auto flex w-full max-w-7xl flex-1 flex-col items-center justify-center gap-5 px-5 pb-16 pt-10 text-center sm:px-8">
         <Image
           src="/logo-synth.webp"
-          alt="Synthyard EA Hosting"
+          alt="SkuD Turbo"
           width={72}
           height={72}
           priority
           className="size-16 rounded-2xl object-cover"
         />
-        <p className="text-xs font-extrabold uppercase tracking-[0.25em] text-white/75">Synthyard EA Hosting</p>
+        <p className="text-xs font-extrabold uppercase tracking-[0.25em] text-white/75">SkuD Turbo</p>
         <h1 className="max-w-md text-balance text-3xl font-extrabold leading-tight sm:text-4xl">
           Install the app to continue
         </h1>
@@ -51,7 +51,7 @@ export function InstallRequired() {
       </section>
 
       <footer className="mx-auto flex w-full max-w-7xl items-center justify-center px-5 pb-5 text-[10px] font-bold uppercase tracking-[0.16em] text-white/45 sm:px-8">
-        <span>© Synthyard EA Hosting</span>
+        <span>© SkuD Turbo</span>
       </footer>
     </main>
   )

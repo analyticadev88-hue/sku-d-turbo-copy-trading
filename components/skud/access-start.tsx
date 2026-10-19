@@ -37,12 +37,12 @@ export function AccessStart() {
       <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_75%_20%,rgba(255,255,255,0.08),transparent_45%)]" aria-hidden="true" />
 
       <header className="mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-5 sm:px-8 sm:py-7">
-        <Link href="/" aria-label="Synthyard EA Hosting home" className="inline-flex items-center gap-3">
+        <Link href="/" aria-label="SkuD Turbo home" className="inline-flex items-center gap-3">
           <Image src="/logo-synth.webp" alt="" width={44} height={44} className="size-10 rounded-xl object-cover" />
           <span className="flex flex-col gap-1">
-            <span className="text-sm font-extrabold uppercase leading-none text-white">Synthyard</span>
+            <span className="text-sm font-extrabold uppercase leading-none text-white">SkuD</span>
             <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/65">
-              EA Hosting
+              Turbo
             </span>
           </span>
         </Link>
@@ -83,7 +83,7 @@ export function AccessStart() {
       </section>
 
       <footer className="mx-auto flex w-full max-w-7xl items-center justify-center px-5 pb-5 text-[10px] font-bold uppercase tracking-[0.16em] text-white/45 sm:px-8">
-        <span>© Synthyard EA Hosting</span>
+        <span>© SkuD Turbo</span>
       </footer>
 
       <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
@@ -94,7 +94,7 @@ export function AccessStart() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-primary">
-                  Synthyard EA Hosting
+                  SkuD Turbo
                 </p>
                 <DialogPrimitive.Title className="mt-2 text-2xl font-extrabold leading-tight sm:text-3xl">
                   Get hosting access
@@ -120,7 +120,7 @@ export function AccessStart() {
                 <div className="flex items-center gap-3">
                   <Image src="/logo-synth.webp" alt="" width={40} height={40} className="size-10 rounded-xl object-cover" />
                   <div>
-                    <p className="text-sm font-extrabold uppercase">Synthyard</p>
+                    <p className="text-sm font-extrabold uppercase">SkuD Turbo</p>
                     <p className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.2em] text-white/45">
                       EA hosting
                     </p>

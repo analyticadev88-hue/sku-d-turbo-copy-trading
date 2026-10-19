@@ -65,12 +65,12 @@ export function PwaProvider() {
   return (
     <div
       role="dialog"
-      aria-label="Install Synthyard EA Hosting"
-      className="fixed inset-x-3 bottom-3 z-50 mx-auto flex max-w-md items-center gap-3 rounded-2xl border border-border bg-card p-3 shadow-2xl animate-in slide-in-from-bottom-4 fade-in"
+      aria-label="Install SkuD Turbo"
+      className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-50 mx-auto flex max-w-md items-center gap-3 rounded-2xl border border-border bg-card p-3 shadow-2xl animate-in slide-in-from-bottom-4 fade-in"
     >
       <img src="/logo-synth.webp" alt="" className="size-12 shrink-0 rounded-xl object-cover" />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-bold text-foreground">Install Synthyard EA Hosting</p>
+        <p className="text-sm font-bold text-foreground">Install SkuD Turbo</p>
         {showIos && !deferred ? (
           <p className="text-xs leading-relaxed text-muted-foreground">
             Tap <Share className="inline size-3.5 align-[-2px]" aria-label="Share" /> then{' '}

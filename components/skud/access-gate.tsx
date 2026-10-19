@@ -14,9 +14,9 @@ import { getBrowserSupabase } from '@/lib/supabase'
 function AccessSplash() {
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-[#0b0b0d] text-white">
-      <Image src="/logo-synth.webp" alt="Synthyard EA Hosting" width={72} height={72} priority className="size-16 animate-pulse rounded-2xl object-cover" />
+      <Image src="/logo-synth.webp" alt="SkuD Turbo" width={72} height={72} priority className="size-16 animate-pulse rounded-2xl object-cover" />
       <p className="text-[10px] font-extrabold uppercase tracking-[0.3em] text-white/65">
-        Synthyard EA Hosting
+        SkuD Turbo
       </p>
     </main>
   )
