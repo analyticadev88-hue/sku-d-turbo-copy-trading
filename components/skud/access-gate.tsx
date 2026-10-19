@@ -6,7 +6,9 @@ import { AccessFlow } from './access-flow'
 import { AccessStart } from './access-start'
 import { Dashboard } from './dashboard'
 import { GetStarted } from './get-started'
+import { InstallRequired } from './install-required'
 import { loadStoredAccount, type StoredMt5Account } from './mt5-session'
+import { usePwaInstall } from '@/components/pwa/use-pwa-install'
 import { getBrowserSupabase } from '@/lib/supabase'
 
 function AccessSplash() {
@@ -28,6 +30,7 @@ export function AccessGate({ preview, checkout, login }: { preview: boolean; che
   const [access, setAccess] = useState<AccessState | null | undefined>(undefined)
   const [orderId, setOrderId] = useState<string | undefined>()
   const [stored, setStored] = useState<StoredMt5Account | null>(null)
+  const { installed } = usePwaInstall()
 
   useEffect(() => {
     if (preview) return
@@ -68,7 +71,9 @@ export function AccessGate({ preview, checkout, login }: { preview: boolean; che
 
   if (preview) return <Dashboard preview />
 
-  if (access === undefined) return <AccessSplash />
+  if (installed === undefined || access === undefined) return <AccessSplash />
+
+  if (!installed && checkout !== 'returned') return <InstallRequired />
 
   if (access === 'error') {
     return (
@@ -90,5 +95,5 @@ export function AccessGate({ preview, checkout, login }: { preview: boolean; che
   }
   if (login) return <AccessFlow loginOnly />
   if (access === 'expired') return <AccessStart />
-  return <AccessStart />
+  return <AccessFlow loginOnly />
 }

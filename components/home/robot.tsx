@@ -1,5 +1,5 @@
-import Link from 'next/link'
-import { ArrowUpRight, Bot, Link2, ShieldCheck } from 'lucide-react'
+import { Bot, Link2, ShieldCheck } from 'lucide-react'
+import { InstallAppButton } from '@/components/pwa/install-app-button'
 
 const steps = [
   {
@@ -43,13 +43,10 @@ export function Robot() {
           ))}
         </ol>
 
-        <Link
-          href="/dashboard"
+        <InstallAppButton
+          label="Install the app"
           className="inline-flex w-fit items-center gap-2 rounded-full bg-primary px-6 py-3.5 text-sm font-extrabold uppercase tracking-wider text-primary-foreground transition-transform hover:scale-[1.03]"
-        >
-          Open the dashboard
-          <ArrowUpRight className="size-4" aria-hidden="true" />
-        </Link>
+        />
       </div>
     </section>
   )

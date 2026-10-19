@@ -26,6 +26,8 @@ export function AccessFlow({
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [checkoutError, setCheckoutError] = useState<string | null>(null)
+  const [isStartingCheckout, setIsStartingCheckout] = useState(false)
 
   async function checkPayment() {
     if (!orderId) return
@@ -120,6 +122,27 @@ export function AccessFlow({
     return () => { active = false }
   }, [orderId, paymentStatus])
 
+  async function startCheckout() {
+    setCheckoutError(null)
+    setIsStartingCheckout(true)
+
+    try {
+      const response = await fetch('/api/payments/create', { method: 'POST' })
+      const result = (await response.json()) as { invoiceUrl?: string; orderId?: string; error?: string }
+      if (!response.ok || !result.invoiceUrl) {
+        throw new Error(result.error ?? 'Could not start checkout. Please try again.')
+      }
+
+      if (result.orderId) window.localStorage.setItem('skud-payment-order', result.orderId)
+      window.location.assign(result.invoiceUrl)
+    } catch (error) {
+      setCheckoutError(
+        error instanceof Error ? error.message : 'Could not start checkout. Please try again.',
+      )
+      setIsStartingCheckout(false)
+    }
+  }
+
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setBusy(true)
@@ -168,10 +191,6 @@ export function AccessFlow({
       if (access.status === 'approved') setExpiresAt(access.expiresAt ?? null)
       if (access.status === 'pending') {
         setMessage('Your payment is confirmed. A mentor must approve your account before you can enter SkuD Turbo.')
-      }
-      if (access.status === 'payment_required') {
-        setMode('login')
-        setMessage('No paid setup is linked to this account. Complete the hosting payment before creating an account.')
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not complete account access.')
@@ -296,6 +315,46 @@ export function AccessFlow({
     )
   }
 
+  if (accessStatus === 'payment_required') {
+    return (
+      <main className="relative isolate flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-[#0b0b0d] px-5 text-center text-white">
+        <div
+          className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_80%_15%,rgba(255,68,79,0.12),transparent_48%)]"
+          aria-hidden="true"
+        />
+        <DerivMark className="size-12 rounded-xl text-2xl" />
+        <p className="mt-5 text-xs font-extrabold uppercase tracking-[0.25em] text-primary">SkuD Turbo</p>
+        <h1 className="mt-4 text-2xl font-extrabold">Complete your setup payment</h1>
+        <p className="mt-3 max-w-sm text-sm leading-relaxed text-white/55">
+          Your account is ready. Pay the one-time $13 setup fee so a mentor can approve your access.
+        </p>
+        <button
+          type="button"
+          onClick={() => void startCheckout()}
+          disabled={isStartingCheckout}
+          className="mt-6 inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-5 text-sm font-extrabold text-white transition-colors hover:bg-primary/85 disabled:cursor-wait disabled:opacity-60"
+        >
+          {isStartingCheckout ? 'Preparing secure checkout...' : 'Continue to payment — $13'}
+        </button>
+        {checkoutError ? (
+          <p role="alert" className="mt-4 max-w-sm rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-xs leading-relaxed text-white/80">
+            {checkoutError}
+          </p>
+        ) : null}
+        <button
+          type="button"
+          onClick={async () => {
+            await getBrowserSupabase().auth.signOut()
+            window.location.assign('/dashboard')
+          }}
+          className="mt-5 text-xs font-bold uppercase tracking-[0.14em] text-white/45 transition-colors hover:text-white"
+        >
+          Sign out
+        </button>
+      </main>
+    )
+  }
+
   if (accessStatus === 'expired') {
     return (
       <main className="relative isolate flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-[#0b0b0d] px-5 text-center text-white">
@@ -362,7 +421,6 @@ export function AccessFlow({
         <button type="button" onClick={() => { setMode(mode === 'signup' ? 'login' : 'signup'); setMessage(null) }} className="mt-4 w-full text-sm font-semibold text-white/55 transition-colors hover:text-white">
           {mode === 'signup' ? 'Already registered? Sign in' : 'Need an account? Create one'}
         </button>
-        {loginOnly && <a href="/dashboard" className="mt-2 block text-center text-sm font-semibold text-white/55 transition-colors hover:text-white">Need access? Start setup</a>}
         {message && <p role="status" className="mt-4 rounded-md border border-white/15 bg-white/5 px-3 py-2 text-xs leading-relaxed text-white/65">{message}</p>}
       </section>
     </main>
