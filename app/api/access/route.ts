@@ -29,6 +29,11 @@ async function accessState(userId: string, clientSessionId = '') {
     return { status: 'superseded' as const }
   }
 
+  const paidOrder = await prisma.paymentOrder.findFirst({
+    where: { userId, status: 'PAID' },
+    select: { id: true },
+  })
+
   const subscription = user.subscriptions[0]
   if (user.accessStatus === 'APPROVED' && subscription) {
     return {
@@ -37,6 +42,7 @@ async function accessState(userId: string, clientSessionId = '') {
     }
   }
   if (user.accessStatus === 'REJECTED') return { status: 'rejected' as const }
+  if (!paidOrder) return { status: 'payment_required' as const }
   if (user.accessStatus === 'APPROVED') return { status: 'expired' as const }
   return { status: 'pending' as const }
 }

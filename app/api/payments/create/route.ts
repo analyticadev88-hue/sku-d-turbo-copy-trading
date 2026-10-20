@@ -7,6 +7,7 @@ const NOWPAYMENTS_LIVE_URL = 'https://api.nowpayments.io/v1'
 
 type NowPaymentsInvoice = {
   invoice_url?: string
+  id?: string
 }
 
 export async function POST(request: Request) {
@@ -62,6 +63,7 @@ export async function POST(request: Request) {
         price_currency: SETUP_PRICE_CURRENCY,
         order_id: orderId,
         order_description: 'SkuD Turbo EA hosting and Germany MT5 server setup',
+        ipn_callback_url: new URL('/api/webhooks/nowpayments', appBase).toString(),
         success_url: new URL(
           `/dashboard?checkout=returned&order_id=${encodeURIComponent(orderId)}`,
           appBase,
@@ -104,6 +106,13 @@ export async function POST(request: Request) {
     invoiceUrl.hostname === 'nowpayments.io' || invoiceUrl.hostname.endsWith('.nowpayments.io')
   if (invoiceUrl.protocol !== 'https:' || !trustedHost) {
     return Response.json({ error: 'NOWPayments returned an unexpected checkout link.' }, { status: 502 })
+  }
+
+  if (invoice.id) {
+    await prisma.paymentOrder.update({
+      where: { id: orderId },
+      data: { invoiceId: String(invoice.id) },
+    }).catch(() => {})
   }
 
   return Response.json({

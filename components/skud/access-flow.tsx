@@ -264,6 +264,15 @@ export function AccessFlow({
             Check payment
           </button>
         )}
+        {paymentStatus !== 'failed' && (
+          <button
+            type="button"
+            onClick={() => window.location.assign('/dashboard?login=1')}
+            className="mt-3 text-xs font-bold uppercase tracking-[0.14em] text-white/45 transition-colors hover:text-white"
+          >
+            Back to sign in
+          </button>
+        )}
         {paymentStatus === 'failed' && (
           <a href="/dashboard" className="mt-6 rounded-md border border-white/25 px-4 py-2 text-sm font-bold text-white hover:bg-white/10">
             Return to checkout

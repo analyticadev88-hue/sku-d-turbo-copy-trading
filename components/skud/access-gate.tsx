@@ -125,6 +125,9 @@ export function AccessGate({ preview, checkout, login }: { preview: boolean; che
   if (access === 'pending' || access === 'rejected') {
     return <AccessFlow initialAccessStatus={access} orderId={orderId} />
   }
+  if (access === 'payment_required' && !orderId) {
+    return <AccessFlow initialAccessStatus="payment_required" />
+  }
   if (orderId && (checkout === 'returned' || access === null || access === 'payment_required' || access === 'expired')) {
     return <AccessFlow orderId={orderId} />
   }

@@ -60,6 +60,7 @@ model PaymentOrder {
   status    PaymentStatus @default(PENDING)
   userId    String?       @db.Uuid
   user      User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  invoiceId String?
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
 
