@@ -1,32 +1,24 @@
-import { getImageProps } from 'next/image'
+import Image from 'next/image'
 import { InstallAppButton } from '@/components/pwa/install-app-button'
 import { DerivLogo } from '@/components/skud/deriv-logo'
 
-const common = {
-  alt: 'SkuD Turbo — the trading robot running on your Deriv MT5 account',
-  sizes: '100vw',
-  fill: true,
-} as const
-
 export function Hero() {
-  const {
-    props: { srcSet: desktop },
-  } = getImageProps({ ...common, src: '/images/herodesk.png' })
-  const {
-    props: { srcSet: mobile, ...rest },
-  } = getImageProps({ ...common, src: '/images/skud-hero.jpg' })
-
   return (
     <section className="relative isolate flex min-h-dvh flex-col overflow-hidden" aria-labelledby="hero-title">
-      <picture>
-        <source media="(min-width: 768px)" srcSet={desktop} />
-        <img
-          {...rest}
-          loading="eager"
-          fetchPriority="high"
-          className="-z-10 object-cover object-[50%_20%] md:object-center"
-        />
-      </picture>
+      <Image
+        src="/images/herodesk.png"
+        alt="The SkuD Turbo app running a Deriv MT5 account on mobile"
+        fill
+        sizes="100vw"
+        className="-z-10 hidden object-cover object-center md:block"
+      />
+      <Image
+        src="/images/skud-hero.jpg"
+        alt="Skud, founder of SkuD Turbo, standing in front of his car"
+        fill
+        sizes="100vw"
+        className="-z-10 object-cover object-[50%_20%] md:hidden"
+      />
       <div
         className="absolute inset-0 -z-10 bg-gradient-to-b from-background/60 via-background/10 to-background"
         aria-hidden="true"
