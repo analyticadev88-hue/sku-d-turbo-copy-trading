@@ -1,6 +1,6 @@
 // Mentor publisher EA. Install only on the source account terminal.
 #property strict
-#property version "1.11"
+#property version "1.12"
 
 input string BridgeUrl = "https://skud.toporapula.dev";
 input string MentorId = "mentor-skud-01";
@@ -27,7 +27,7 @@ int OnInit()
       StringLen(BridgeKey) < 32 || RetrySeconds < 1 || ReportSeconds < 1)
       return INIT_PARAMETERS_INCORRECT;
    EventSetTimer(RetrySeconds);
-   Print("SkuD Mentor EA build 1.11 ready for ", MentorName, " (", MentorId, "). MT5 login: ",
+   Print("SkuD Mentor EA build 1.12 ready for ", MentorName, " (", MentorId, "). MT5 login: ",
          (long)AccountInfoInteger(ACCOUNT_LOGIN));
       Print("Mentor EA uses the platform BridgeKey. Allow WebRequest for ", BridgeUrl,
          " in MT5 Options > Expert Advisors.");
@@ -111,15 +111,26 @@ void OnTradeTransaction(const MqlTradeTransaction &transaction,
    string side = deal_type == DEAL_TYPE_BUY ? "buy" : "sell";
    string symbol = HistoryDealGetString(transaction.deal, DEAL_SYMBOL);
    double volume = HistoryDealGetDouble(transaction.deal, DEAL_VOLUME);
+   double deal_price = HistoryDealGetDouble(transaction.deal, DEAL_PRICE);
+   double deal_sl = HistoryDealGetDouble(transaction.deal, DEAL_SL);
+   double deal_tp = HistoryDealGetDouble(transaction.deal, DEAL_TP);
+   bool sl_enabled = deal_sl > 0;
+   bool tp_enabled = deal_tp > 0;
+   double sl_distance = sl_enabled ? MathAbs(deal_price - deal_sl) : 0;
+   double tp_distance = tp_enabled ? MathAbs(deal_tp - deal_price) : 0;
    string event_id = StringFormat("%I64u", transaction.deal);
    string position_text = StringFormat("%I64u", position_id);
    string body = StringFormat(
       "{\"mentor_id\":\"%s\",\"mentor_name\":\"%s\",\"login\":\"%I64d\","
       "\"server\":\"%s\",\"event_id\":\"%s\",\"position_id\":\"%s\","
-      "\"event_type\":\"%s\",\"symbol\":\"%s\",\"side\":\"%s\",\"volume\":%.8f}",
+      "\"event_type\":\"%s\",\"symbol\":\"%s\",\"side\":\"%s\",\"volume\":%.8f,"
+      "\"sl_enabled\":%s,\"sl_distance\":%.10f,"
+      "\"tp_enabled\":%s,\"tp_distance\":%.10f}",
       JsonEscape(MentorId), JsonEscape(MentorName), AccountInfoInteger(ACCOUNT_LOGIN),
       JsonEscape(AccountInfoString(ACCOUNT_SERVER)), event_id, position_text,
-      event_type, JsonEscape(symbol), side, volume);
+      event_type, JsonEscape(symbol), side, volume,
+      sl_enabled ? "true" : "false", sl_distance,
+      tp_enabled ? "true" : "false", tp_distance);
    int size = ArraySize(g_pending_events);
    ArrayResize(g_pending_events, size + 1);
    g_pending_events[size] = body;

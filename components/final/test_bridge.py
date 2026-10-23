@@ -335,6 +335,51 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(self.request("/v1/commands/next?login=111111", token="test-ea-token")[0], 200)
         self.assertEqual(self.request("/v1/commands/next?login=222222", token="test-ea-token")[0], 200)
 
+    def test_mentor_open_event_propagates_sl_tp_to_follower_commands(self):
+        self.assertEqual(self.register_mentor()[0], 200)
+        self.assertEqual(self.provision(login="111111", mentor_id="mentor-skud-01")[0], 200)
+        status, body = self.request("/v1/mentor/events", "POST", BRIDGE_KEY, {
+            "mentor_id": "mentor-skud-01", "mentor_name": "SkudTurbo",
+            "login": "987654", "server": "OtherBroker-Demo",
+            "event_id": "123456789", "position_id": "123456789",
+            "event_type": "open", "symbol": "XAGUSD", "side": "buy", "volume": 0.1,
+            "sl_enabled": True, "sl_distance": 0.25,
+            "tp_enabled": True, "tp_distance": 0.5,
+        })
+        self.assertEqual(status, 202)
+        self.assertEqual(json.loads(body)["queued"], 1)
+        command_status, command = self.request("/v1/commands/next?login=111111", token="test-ea-token")
+        self.assertEqual(command_status, 200)
+        fields = command.decode().split("|")
+        self.assertEqual(fields[5], "1")
+        self.assertAlmostEqual(float(fields[6]), 0.5)
+        self.assertEqual(fields[7], "1")
+        self.assertAlmostEqual(float(fields[8]), 0.25)
+
+    def test_mentor_open_event_without_sl_tp_keeps_them_disabled(self):
+        self.assertEqual(self.register_mentor()[0], 200)
+        self.assertEqual(self.provision(login="111111", mentor_id="mentor-skud-01")[0], 200)
+        self.assertEqual(self.mentor_event()[0], 202)
+        command_status, command = self.request("/v1/commands/next?login=111111", token="test-ea-token")
+        self.assertEqual(command_status, 200)
+        fields = command.decode().split("|")
+        self.assertEqual(fields[5], "0")
+        self.assertEqual(float(fields[6]), 0)
+        self.assertEqual(fields[7], "0")
+        self.assertEqual(float(fields[8]), 0)
+
+    def test_mentor_event_rejects_enabled_sl_without_distance(self):
+        self.assertEqual(self.register_mentor()[0], 200)
+        status, body = self.request("/v1/mentor/events", "POST", BRIDGE_KEY, {
+            "mentor_id": "mentor-skud-01", "mentor_name": "SkudTurbo",
+            "login": "987654", "server": "OtherBroker-Demo",
+            "event_id": "123456789", "position_id": "123456789",
+            "event_type": "open", "symbol": "EURUSD", "side": "buy", "volume": 0.1,
+            "sl_enabled": True, "sl_distance": 0,
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("sl_distance", json.loads(body)["error"])
+
     def test_bridge_key_auto_registers_mentor_and_publishes_events(self):
         self.assertEqual(self.provision(login="111111", mentor_id="mentor-skud-01")[0], 200)
         event = {

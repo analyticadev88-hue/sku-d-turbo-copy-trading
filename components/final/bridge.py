@@ -473,7 +473,25 @@ def validate_mentor_event(payload: object) -> dict:
         raise ValueError("Trade event volume must be a number.") from None
     if not math.isfinite(volume) or volume <= 0 or volume > 100:
         raise ValueError("Trade event volume must be greater than zero and no more than 100 lots.")
-    return {
+    tp_enabled = payload.get("tp_enabled", False)
+    if not isinstance(tp_enabled, bool):
+        raise ValueError("tp_enabled must be a boolean.")
+    try:
+        tp_distance = float(payload.get("tp_distance", 0))
+    except (TypeError, ValueError):
+        raise ValueError("tp_distance must be a number.") from None
+    if not math.isfinite(tp_distance) or tp_distance < 0 or (tp_enabled and tp_distance <= 0):
+        raise ValueError("tp_distance must be a non-negative number and positive when tp_enabled is true.")
+    sl_enabled = payload.get("sl_enabled", False)
+    if not isinstance(sl_enabled, bool):
+        raise ValueError("sl_enabled must be a boolean.")
+    try:
+        sl_distance = float(payload.get("sl_distance", 0))
+    except (TypeError, ValueError):
+        raise ValueError("sl_distance must be a number.") from None
+    if not math.isfinite(sl_distance) or sl_distance < 0 or (sl_enabled and sl_distance <= 0):
+        raise ValueError("sl_distance must be a non-negative number and positive when sl_enabled is true.")
+    result = {
         "mentor_id": mentor_id,
         "mentor_name": mentor_name,
         "login": login,
@@ -485,6 +503,13 @@ def validate_mentor_event(payload: object) -> dict:
         "side": side,
         "volume": volume,
     }
+    if "tp_enabled" in payload or "tp_distance" in payload:
+        result["tp_enabled"] = tp_enabled
+        result["tp_distance"] = tp_distance
+    if "sl_enabled" in payload or "sl_distance" in payload:
+        result["sl_enabled"] = sl_enabled
+        result["sl_distance"] = sl_distance
+    return result
 
 
 def scale_follower_volume(db: sqlite3.Connection, follower: sqlite3.Row, symbol: str, event_volume: float) -> float:
@@ -969,9 +994,11 @@ class BridgeHandler(BaseHTTPRequestHandler):
                         db.execute(
                             "INSERT INTO orders(id,login,symbol,order_type,volume,entry_price,tp_enabled,tp_distance,"
                             "sl_enabled,sl_distance,status,mentor_id,mentor_name,source_event_id,source_position_id,created_at,updated_at) "
-                            "VALUES(?,?,?,?,?,0,0,0,0,0,'queued',?,?,?,?,?,?)",
+                            "VALUES(?,?,?,?,?,0,?,?,?,?,'queued',?,?,?,?,?,?)",
                             (str(uuid4()), follower["login"], event["symbol"],
                              "MARKET_BUY" if event["side"] == "buy" else "MARKET_SELL", volume,
+                             int(event.get("tp_enabled", False)), float(event.get("tp_distance", 0)),
+                             int(event.get("sl_enabled", False)), float(event.get("sl_distance", 0)),
                              event["mentor_id"], mentor["mentor_name"], event["event_id"], event["position_id"], now, now),
                         )
                         queued += 1
