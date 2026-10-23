@@ -1,6 +1,7 @@
 import { Hero } from '@/components/home/hero'
 import { Ticker } from '@/components/home/ticker'
 import { Founder } from '@/components/home/founder'
+import { Midsection } from '@/components/home/midsection'
 import { Robot } from '@/components/home/robot'
 import { DerivLogo } from '@/components/skud/deriv-logo'
 
@@ -11,6 +12,7 @@ export default function HomePage() {
         <Hero />
         <Ticker />
         <Founder />
+        <Midsection />
         <Robot />
       </main>
       <footer className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 py-12 md:px-10">
