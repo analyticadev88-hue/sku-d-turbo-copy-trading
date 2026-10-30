@@ -21,13 +21,13 @@ export function SynthyardCheckoutDialog({
 
     try {
       const response = await fetch('/api/payments/create', { method: 'POST' })
-      const result = (await response.json()) as { invoiceUrl?: string; orderId?: string; error?: string }
-      if (!response.ok || !result.invoiceUrl) {
+      const result = (await response.json()) as { checkoutUrl?: string; orderId?: string; error?: string }
+      if (!response.ok || !result.checkoutUrl || !result.orderId) {
         throw new Error(result.error ?? 'Could not start checkout. Please try again.')
       }
 
-      if (result.orderId) window.localStorage.setItem('skud-payment-order', result.orderId)
-      window.location.assign(result.invoiceUrl)
+      window.localStorage.setItem('skud-payment-order', result.orderId)
+      window.location.assign(result.checkoutUrl)
     } catch (error) {
       setCheckoutError(
         error instanceof Error ? error.message : 'Could not start checkout. Please try again.',
@@ -129,7 +129,7 @@ export function SynthyardCheckoutDialog({
             disabled={isStartingCheckout}
             className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-primary px-5 text-sm font-extrabold text-primary-foreground transition-colors hover:bg-primary/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-wait disabled:opacity-70"
           >
-            {isStartingCheckout ? 'Preparing secure checkout...' : 'Continue to hosting payment — $13'}
+            {isStartingCheckout ? 'Opening secure checkout...' : 'Pay with card — $13'}
             {!isStartingCheckout && <ArrowRight className="size-4" aria-hidden="true" />}
           </button>
           {checkoutError ? (
@@ -139,7 +139,7 @@ export function SynthyardCheckoutDialog({
           ) : (
             <p className="mt-3 flex items-center justify-center gap-1.5 text-center text-[11px] leading-relaxed text-white/45">
               <Check className="size-3.5 text-success" aria-hidden="true" />
-              Secure checkout is provided by NOWPayments. Your mentor never sees or handles this payment.
+              You’ll complete your secure card payment on Whop. Your mentor never sees or handles this payment.
             </p>
           )}
         </DialogPrimitive.Popup>
