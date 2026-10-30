@@ -112,6 +112,7 @@ export async function POST(request: Request) {
         redirect_url: returnUrl.toString(),
         payment_method_configuration: {
           enabled: ['card'],
+          disabled: [],
           include_platform_defaults: false,
         },
       }),
