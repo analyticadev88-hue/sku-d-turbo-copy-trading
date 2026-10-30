@@ -5,6 +5,28 @@ type WhopCheckoutConfiguration = {
   purchase_url?: unknown
 }
 
+function getWhopErrorMessage(value: unknown, apiKey: string): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return
+
+  const record = value as Record<string, unknown>
+  const error = record.error
+  const candidates = [
+    record.message,
+    record.detail,
+    typeof error === 'string' ? error : undefined,
+    error && typeof error === 'object' && !Array.isArray(error)
+      ? (error as Record<string, unknown>).message
+      : undefined,
+    error && typeof error === 'object' && !Array.isArray(error)
+      ? (error as Record<string, unknown>).detail
+      : undefined,
+  ]
+  const message = candidates.find((candidate): candidate is string => typeof candidate === 'string')
+  if (!message) return
+
+  return message.replaceAll(apiKey, '[redacted]').slice(0, 400)
+}
+
 function isWhopCheckoutUrl(value: unknown): value is string {
   if (typeof value !== 'string') return false
   try {
@@ -105,17 +127,38 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Could not reach Whop. Please try again.' }, { status: 502 })
   }
 
-  const configuration = (await providerResponse.json().catch(() => null)) as
-    | WhopCheckoutConfiguration
-    | null
-  if (!providerResponse.ok || !isWhopCheckoutUrl(configuration?.purchase_url)) {
+  const responseBody = await providerResponse.text()
+  let responseData: unknown
+  try {
+    responseData = JSON.parse(responseBody)
+  } catch {
+    responseData = null
+  }
+
+  if (!providerResponse.ok) {
+    try {
+      await markOrderFailed(orderId)
+    } catch {
+      return Response.json({ error: 'Could not record the failed checkout attempt.' }, { status: 503 })
+    }
+    const detail = getWhopErrorMessage(responseData, apiKey)
+    return Response.json(
+      {
+        error: `Whop rejected checkout creation (HTTP ${providerResponse.status}).${detail ? ` ${detail}` : ' Check that Vercel has the production API key, that the plan belongs to that Whop account, and that the key can create checkout configurations.'}`,
+      },
+      { status: 502 },
+    )
+  }
+
+  const configuration = responseData as WhopCheckoutConfiguration | null
+  if (!isWhopCheckoutUrl(configuration?.purchase_url)) {
     try {
       await markOrderFailed(orderId)
     } catch {
       return Response.json({ error: 'Could not record the failed checkout attempt.' }, { status: 503 })
     }
     return Response.json(
-      { error: 'Whop could not create the hosted checkout. Check the production API key, plan ID, and API key permissions.' },
+      { error: 'Whop returned a successful response without a valid hosted checkout URL.' },
       { status: 502 },
     )
   }
