@@ -2,7 +2,7 @@
 
 import Image from 'next/image'
 import { useEffect, useState, type FormEvent } from 'react'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff, LoaderCircle } from 'lucide-react'
 import { getBrowserSupabase } from '@/lib/supabase'
 import { DerivMark } from './deriv-logo'
 import { SynthyardCheckoutDialog } from './synthyard-checkout'
@@ -19,7 +19,9 @@ export function AccessFlow({
   initialAccessStatus?: AccessStatus
   loginOnly?: boolean
 }) {
-  const [paymentStatus, setPaymentStatus] = useState<'checking' | 'pending' | 'paid' | 'failed'>(
+  const [paymentStatus, setPaymentStatus] = useState<
+    'checking' | 'pending' | 'unverified' | 'paid' | 'failed'
+  >(
     orderId ? 'checking' : 'paid',
   )
   const [mode, setMode] = useState<'signup' | 'login'>(loginOnly || !orderId ? 'login' : 'signup')
@@ -30,31 +32,24 @@ export function AccessFlow({
   const [showPassword, setShowPassword] = useState(false)
   const [checkoutOpen, setCheckoutOpen] = useState(false)
 
-  async function checkPayment() {
-    if (!orderId) return
-    try {
-      const response = await fetch(`/api/payments/status?order_id=${encodeURIComponent(orderId)}`, {
-        cache: 'no-store',
-      })
-      const result = await response.json() as { status?: string; error?: string }
-      if (!response.ok) throw new Error(result.error ?? 'Could not check payment status.')
-      if (result.status === 'PAID') setPaymentStatus('paid')
-      else if (result.status === 'FAILED') {
-        window.localStorage.removeItem('skud-payment-order')
-        setPaymentStatus('failed')
-      } else {
-        setPaymentStatus('pending')
-      }
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not check payment status.')
-    }
-  }
-
   useEffect(() => {
     if (!orderId) return
     const currentOrderId = orderId
+    const verificationTimeoutMs = 60_000
+    const startedAt = Date.now()
     let active = true
     let timer: ReturnType<typeof setTimeout> | undefined
+
+    function setUnverifiedIfTimedOut() {
+      if (Date.now() - startedAt < verificationTimeoutMs) return false
+      setPaymentStatus('unverified')
+      return true
+    }
+
+    function scheduleNextCheck() {
+      const delay = Date.now() - startedAt >= verificationTimeoutMs ? 15_000 : 4_000
+      timer = setTimeout(poll, delay)
+    }
 
     async function poll() {
       try {
@@ -68,16 +63,15 @@ export function AccessFlow({
         else if (result.status === 'FAILED') {
           window.localStorage.removeItem('skud-payment-order')
           setPaymentStatus('failed')
-        }
-        else {
-          setPaymentStatus('pending')
-          timer = setTimeout(poll, 4000)
+        } else {
+          if (!setUnverifiedIfTimedOut()) setPaymentStatus('pending')
+          scheduleNextCheck()
         }
       } catch (error) {
         if (!active) return
-        setPaymentStatus('pending')
+        if (!setUnverifiedIfTimedOut()) setPaymentStatus('pending')
         setMessage(error instanceof Error ? error.message : 'Could not check payment status.')
-        timer = setTimeout(poll, 6000)
+        scheduleNextCheck()
       }
     }
 
@@ -251,32 +245,48 @@ export function AccessFlow({
         <Image src="/logo-synth.webp" alt="SkuD Turbo" width={72} height={72} priority className="size-16 rounded-2xl object-cover" />
         <p className="mt-5 text-xs font-extrabold uppercase tracking-[0.25em] text-white/75">SkuD Turbo</p>
         <h1 className="mt-6 text-2xl font-bold">
-          {paymentStatus === 'failed' ? 'Payment not completed' : 'Confirming your payment'}
+          {paymentStatus === 'failed'
+            ? 'Payment not completed'
+            : paymentStatus === 'unverified'
+              ? 'Payment not verified yet'
+              : 'Confirming your payment'}
         </h1>
         <p className="mt-3 max-w-sm text-sm leading-relaxed text-white/55">
           {paymentStatus === 'failed'
-            ? 'This payment did not complete. Return to the access page and try again.'
-            : 'As soon as Synthyard confirms your payment, your account is registered for mentor approval.'}
+            ? 'Whop reported that this payment did not complete. You can try again below.'
+            : paymentStatus === 'unverified'
+              ? 'We could not confirm your payment yet. If you were charged, do not pay again. We will keep checking automatically; if you canceled checkout, you can try again below.'
+              : 'We’re checking with Synthyard for your payment confirmation. This usually takes a few seconds.'}
         </p>
         {message && <p role="status" className="mt-4 max-w-sm text-xs text-white/45">{message}</p>}
-        {paymentStatus === 'pending' && (
-          <button type="button" onClick={() => void checkPayment()} className="mt-6 rounded-md border border-white/25 px-4 py-2 text-sm font-bold text-white hover:bg-white/10">
-            Check payment
-          </button>
+        {(paymentStatus === 'checking' || paymentStatus === 'pending') && (
+          <LoaderCircle className="mt-6 size-6 animate-spin text-primary" aria-label="Checking payment status" />
         )}
-        {paymentStatus !== 'failed' && (
-          <button
-            type="button"
-            onClick={() => window.location.assign('/dashboard?login=1')}
-            className="mt-3 text-xs font-bold uppercase tracking-[0.14em] text-white/45 transition-colors hover:text-white"
-          >
-            Back to sign in
-          </button>
+        {(paymentStatus === 'unverified' || paymentStatus === 'failed') && (
+          <div className="mt-6 flex flex-col items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setCheckoutOpen(true)}
+              className="rounded-md bg-primary px-4 py-2 text-sm font-bold text-primary-foreground hover:bg-primary/85"
+            >
+              {paymentStatus === 'failed'
+                ? 'Try payment again'
+                : 'I canceled or was not charged — try again'}
+            </button>
+          </div>
         )}
-        {paymentStatus === 'failed' && (
-          <a href="/dashboard" className="mt-6 rounded-md border border-white/25 px-4 py-2 text-sm font-bold text-white hover:bg-white/10">
-            Return to checkout
-          </a>
+        <button
+          type="button"
+          onClick={() => {
+            window.localStorage.removeItem('skud-payment-order')
+            window.location.assign('/dashboard?login=1')
+          }}
+          className="mt-3 text-xs font-bold uppercase tracking-[0.14em] text-white/45 transition-colors hover:text-white"
+        >
+          Back to sign in
+        </button>
+        {(paymentStatus === 'unverified' || paymentStatus === 'failed') && (
+          <SynthyardCheckoutDialog open={checkoutOpen} onOpenChange={setCheckoutOpen} />
         )}
       </main>
     )
