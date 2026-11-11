@@ -9,6 +9,7 @@ import { DerivMark } from './deriv-logo'
 import { AdminClients } from './admin-clients'
 import { AdminMt5 } from './admin-mt5'
 import { AdminTrade } from './admin-trade'
+import { ServerPayModal } from './server-pay-modal'
 
 export type AdminTab = 'home' | 'clients' | 'mt5'
 
@@ -151,6 +152,8 @@ export function AdminApp() {
         {tab === 'clients' && <AdminClients />}
         {tab === 'mt5' && <AdminMt5 switchTab={setTab} />}
       </div>
+
+      <ServerPayModal />
 
       <nav aria-label="Admin navigation" className="fixed inset-x-0 bottom-[max(1rem,env(safe-area-inset-bottom))] z-30 flex justify-center px-3">
         <div className="flex items-center gap-1 rounded-full border border-white/10 bg-[#111114]/95 px-2 py-2 shadow-[0_12px_40px_rgba(0,0,0,0.5)] backdrop-blur">

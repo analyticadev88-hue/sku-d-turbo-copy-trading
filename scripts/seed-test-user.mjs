@@ -1,6 +1,6 @@
 // Test-user seeder: creates real Supabase Auth users for testing.
 // - testing@gmail.com: normal approved user with an ACTIVE subscription.
-// - skudmasima@test.com: admin user (isAdmin) — no payment/subscription needed.
+// - skudmasima@test.com: admin user (isAdmin) — no subscription needed.
 // Idempotent — safe to run repeatedly.
 //
 // Usage: node --env-file=.env.local scripts/seed-test-user.mjs

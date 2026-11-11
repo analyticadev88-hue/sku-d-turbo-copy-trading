@@ -12,6 +12,7 @@ import bridge
 
 
 BRIDGE_KEY = "test-bridge-key"
+ENSURE_TERMINAL = bridge.tm.ensure_terminal
 
 
 class BridgeTests(unittest.TestCase):
@@ -816,6 +817,109 @@ class BridgeTests(unittest.TestCase):
         self.assertIn("MentorId=mentor-skud-01", text)
         self.assertIn("MentorName=SkudTurbo", text)
         self.assertIn("EaToken=keep", text)
+
+    def test_master_webrequest_settings_are_synced_to_managed_terminal(self):
+        master = Path(self.temp_dir.name) / "master"
+        terminal = Path(self.temp_dir.name) / "slot"
+        master_config = master / "Config" / "common.ini"
+        terminal_config = terminal / "Config" / "common.ini"
+        master_config.parent.mkdir(parents=True)
+        terminal_config.parent.mkdir(parents=True)
+        master_config.write_text(
+            "[Experts]\r\nAllowLiveTrading=1\r\nWebRequest=1\r\n"
+            "WebRequestUrl=https://skud.toporapula.dev\r\n"
+            "WebRequestUrl=http://127.0.0.1:8765\r\n[Objects]\r\nKeep=master\r\n",
+            encoding="utf-16",
+        )
+        terminal_config.write_text(
+            "[Experts]\r\nAllowLiveTrading=0\r\nWebRequest=0\r\n"
+            "WebRequestUrl=https://old.example\r\nCustom=keep\r\n[Objects]\r\nKeep=slot\r\n",
+            encoding="utf-16",
+        )
+
+        with patch.object(bridge.tm, "TERMINAL_MASTER", str(master)):
+            bridge.tm.sync_master_webrequest_settings(terminal)
+
+        text = terminal_config.read_text(encoding="utf-16")
+        self.assertIn("AllowLiveTrading=0", text)
+        self.assertIn("WebRequest=1", text)
+        self.assertIn("WebRequestUrl=https://skud.toporapula.dev", text)
+        self.assertIn("WebRequestUrl=http://127.0.0.1:8765", text)
+        self.assertNotIn("old.example", text)
+        self.assertIn("Custom=keep", text)
+        self.assertIn("Keep=slot", text)
+
+    def test_master_webrequest_settings_require_enabled_url_allowlist(self):
+        master = Path(self.temp_dir.name) / "master-missing-webrequest"
+        terminal = Path(self.temp_dir.name) / "slot-missing-webrequest"
+        config = master / "Config" / "common.ini"
+        config.parent.mkdir(parents=True)
+        config.write_text("[Experts]\r\nWebRequest=0\r\nWebRequestUrl=\r\n", encoding="utf-8")
+
+        with patch.object(bridge.tm, "TERMINAL_MASTER", str(master)):
+            with self.assertRaisesRegex(RuntimeError, "are incomplete"):
+                bridge.tm.sync_master_webrequest_settings(terminal)
+
+    def test_managed_terminal_launch_syncs_master_webrequest_settings(self):
+        master = Path(self.temp_dir.name) / "launch-master"
+        terminal = Path(self.temp_dir.name) / "launch-slot"
+        config = master / "Config" / "common.ini"
+        config.parent.mkdir(parents=True)
+        config.write_text(
+            "[Experts]\r\nWebRequest=1\r\nWebRequestUrl=https://skud.toporapula.dev\r\n",
+            encoding="utf-8",
+        )
+        terminal.mkdir(parents=True)
+        (terminal / "terminal64.exe").write_text("fake", encoding="utf-8")
+
+        with (
+            patch.object(bridge.tm, "TERMINAL_MASTER", str(master)),
+            patch.object(bridge.tm, "running_logins", return_value=set()),
+            patch.object(bridge.tm, "LAUNCH_STAGGER_SEC", 0),
+            patch.object(bridge.tm, "MENTOR_EA_SOURCE", ""),
+            patch.object(bridge.tm, "MENTOR_CHART_TEMPLATE", ""),
+            patch.object(bridge.tm.subprocess, "Popen"),
+        ):
+            launched, message = ENSURE_TERMINAL({
+                "login": "123456",
+                "password": "demo-password",
+                "server": "DerivSVG-Server-02",
+                "folder_path": str(terminal),
+                "role": "mentor",
+                "mentor_meta": {"mentor_id": "mentor-skud-01", "mentor_name": "SkuD"},
+            })
+
+        self.assertTrue(launched)
+        self.assertNotIn("already running", message)
+        target_config = terminal / "Config" / "common.ini"
+        self.assertTrue(
+            target_config.exists(),
+            f"terminal returned {message!r}; master config exists: {config.exists()}",
+        )
+        self.assertIn(
+            "WebRequestUrl=https://skud.toporapula.dev",
+            target_config.read_text(encoding="utf-8"),
+        )
+        startup_configuration = (terminal / "startup.ini").read_text(encoding="utf-8")
+        self.assertIn("[Common]\nLogin=123456", startup_configuration)
+        self.assertIn(
+            "[Experts]\nWebRequest=1\nWebRequestUrl=https://skud.toporapula.dev",
+            startup_configuration,
+        )
+
+    def test_chart_discovery_prefers_named_mentor_profile(self):
+        master = Path(self.temp_dir.name) / "chart-master"
+        generic = master / "MQL5" / "Profiles" / "Charts" / "A-Old" / "chart01.chr"
+        mentor = master / "MQL5" / "Profiles" / "Charts" / "Mentor" / "chart01.chr"
+        generic.parent.mkdir(parents=True)
+        mentor.parent.mkdir(parents=True)
+        generic.write_text("SkuDTurboMentorEA", encoding="utf-8")
+        mentor.write_text("SkuDTurboMentorEA", encoding="utf-8")
+
+        with patch.object(bridge.tm, "TERMINAL_MASTER", str(master)):
+            result = bridge.tm._discover_chart_template("SkuDTurboMentorEA", "Mentor")
+
+        self.assertEqual(result, str(mentor))
 
 
 if __name__ == "__main__":

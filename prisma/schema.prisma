@@ -29,11 +29,14 @@ enum PaymentStatus {
 model User {
   id            String         @id @db.Uuid
   email         String         @unique
-  accessStatus  AccessStatus   @default(PENDING)
-  isAdmin       Boolean        @default(false)
-  mentorId      String?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  accessStatus    AccessStatus   @default(PENDING)
+  isAdmin         Boolean        @default(false)
+  mentorId        String?
+  // The mentor's one-off server payment covers this student. Unpaid approved
+  // students count toward the next Whop payment batch in the admin app.
+  oneOffServerPay Boolean        @default(false)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
   subscriptions Subscription[]
   payments      PaymentOrder[]
 

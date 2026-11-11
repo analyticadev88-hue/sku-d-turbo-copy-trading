@@ -21,8 +21,7 @@ TERMINAL_MASTER = os.environ.get("SKUD_TERMINAL_MASTER", r"C:\skud\mt5-master")
 LAUNCH_STAGGER_SEC = float(os.environ.get("SKUD_LAUNCH_STAGGER_SEC", "5"))
 
 
-def _read_text_any_encoding(raw: bytes) -> str:
-    """Decode .chr/.ini-style bytes the way sync_chart_inputs does."""
+def _decode_text(raw: bytes) -> tuple[str, str]:
     if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
         encoding = "utf-16"
     elif raw.startswith(b"\xef\xbb\xbf"):
@@ -32,8 +31,22 @@ def _read_text_any_encoding(raw: bytes) -> str:
     else:
         encoding = "utf-8"
     try:
-        return raw.decode(encoding)
-    except (UnicodeDecodeError, ValueError):
+        return raw.decode(encoding), encoding
+    except UnicodeDecodeError as error:
+        fallback = "mbcs" if os.name == "nt" else "cp1252"
+        if encoding != fallback:
+            try:
+                return raw.decode(fallback), fallback
+            except UnicodeDecodeError:
+                pass
+        raise ValueError(f"Could not decode MT5 configuration using {encoding} or {fallback}.") from error
+
+
+def _read_text_any_encoding(raw: bytes) -> str:
+    """Decode .chr/.ini-style bytes while retaining their detected encoding."""
+    try:
+        return _decode_text(raw)[0]
+    except ValueError:
         return ""
 
 
@@ -43,7 +56,7 @@ def _discover_ea(expert_name: str) -> str:
     return str(candidate) if candidate.exists() else ""
 
 
-def _discover_chart_template(expert_name: str) -> str:
+def _discover_chart_template(expert_name: str, preferred_profile: str = "") -> str:
     """Find a saved chart profile that has the given EA attached.
 
     Scans the master terminal's Profiles/Charts folders so the SKUD_*_CHART_TEMPLATE
@@ -52,14 +65,19 @@ def _discover_chart_template(expert_name: str) -> str:
     charts_root = Path(TERMINAL_MASTER) / "MQL5" / "Profiles" / "Charts"
     if not charts_root.is_dir():
         return ""
+    matches: list[Path] = []
     for chart in sorted(charts_root.glob("*/*.chr")):
         try:
             text = _read_text_any_encoding(chart.read_bytes())
         except OSError:
             continue
         if expert_name in text:
-            return str(chart)
-    return ""
+            matches.append(chart)
+    if preferred_profile:
+        for chart in matches:
+            if chart.parent.name.casefold() == preferred_profile.casefold():
+                return str(chart)
+    return str(matches[0]) if matches else ""
 
 
 def _resolve_env_path(name: str, discovered: str) -> str:
@@ -74,9 +92,13 @@ def _resolve_env_path(name: str, discovered: str) -> str:
 
 
 EA_SOURCE = _resolve_env_path("SKUD_EA_SOURCE", _discover_ea("SkuDTurboStudentEA"))
-CHART_TEMPLATE = _resolve_env_path("SKUD_CHART_TEMPLATE", _discover_chart_template("SkuDTurboStudentEA"))
+CHART_TEMPLATE = _resolve_env_path(
+    "SKUD_CHART_TEMPLATE", _discover_chart_template("SkuDTurboStudentEA", "SkuD")
+)
 MENTOR_EA_SOURCE = _resolve_env_path("SKUD_MENTOR_EA_SOURCE", _discover_ea("SkuDTurboMentorEA"))
-MENTOR_CHART_TEMPLATE = _resolve_env_path("SKUD_MENTOR_CHART_TEMPLATE", _discover_chart_template("SkuDTurboMentorEA"))
+MENTOR_CHART_TEMPLATE = _resolve_env_path(
+    "SKUD_MENTOR_CHART_TEMPLATE", _discover_chart_template("SkuDTurboMentorEA", "Mentor")
+)
 
 if EA_SOURCE:
     print(f"SkuD terminal manager: student EA = {EA_SOURCE}")
@@ -277,6 +299,131 @@ def _chart_profile_name(template_path: str) -> str:
     return Path(template_path).parent.name or "Default"
 
 
+_WEBREQUEST_SETTING_KEYS = {"allowwebrequest", "webrequest", "webrequesturl"}
+
+
+def _expert_webrequest_settings(text: str) -> list[tuple[str, str]]:
+    settings: list[tuple[str, str]] = []
+    in_experts = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_experts = stripped[1:-1].strip().casefold() == "experts"
+            continue
+        if not in_experts or not stripped or stripped.startswith((";", "#")) or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        if key.strip().casefold() in _WEBREQUEST_SETTING_KEYS:
+            settings.append((key.strip(), value.strip()))
+    return settings
+
+
+def _merge_expert_webrequest_settings(text: str, settings: list[tuple[str, str]]) -> str:
+    newline = "\r\n" if "\r\n" in text else "\n"
+    lines = text.splitlines(keepends=True)
+    section_start = None
+    section_end = len(lines)
+    in_experts = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            if in_experts:
+                section_end = index
+                break
+            in_experts = stripped[1:-1].strip().casefold() == "experts"
+            if in_experts:
+                section_start = index
+
+    setting_lines = [f"{key}={value}{newline}" for key, value in settings]
+    if section_start is None:
+        separator = "" if not text or text.endswith(("\n", "\r")) else newline
+        return f"{text}{separator}[Experts]{newline}{''.join(setting_lines)}"
+
+    retained = [
+        line for line in lines[section_start + 1:section_end]
+        if not (
+            "=" in line and
+            line.split("=", 1)[0].strip().casefold() in _WEBREQUEST_SETTING_KEYS
+        )
+    ]
+    if retained and not retained[-1].endswith(("\n", "\r")):
+        retained[-1] += newline
+    return "".join(
+        lines[:section_start + 1] + retained + setting_lines + lines[section_end:]
+    )
+
+
+def sync_master_webrequest_settings(
+    folder: Path,
+) -> tuple[Path, Path, list[tuple[str, str]]]:
+    """Copy the master terminal's Expert Advisors WebRequest settings to a slot."""
+    relative_paths = (
+        Path("Config") / "common.ini",
+        Path("config") / "common.ini",
+        Path("Config") / "terminal.ini",
+        Path("config") / "terminal.ini",
+    )
+    source_path = None
+    settings: list[tuple[str, str]] = []
+    incomplete_path = None
+    for relative_path in relative_paths:
+        candidate = Path(TERMINAL_MASTER) / relative_path
+        if not candidate.is_file():
+            continue
+        try:
+            text, _ = _decode_text(candidate.read_bytes())
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"Could not read master MT5 settings file {candidate}: {exc}") from exc
+        candidate_settings = _expert_webrequest_settings(text)
+        if candidate_settings:
+            enabled = any(
+                key.casefold() in {"webrequest", "allowwebrequest"} and value.casefold() in {"1", "true"}
+                for key, value in candidate_settings
+            )
+            has_urls = any(
+                key.casefold() == "webrequesturl" and value for key, value in candidate_settings
+            )
+            if enabled and has_urls:
+                source_path = candidate
+                settings = candidate_settings
+                break
+            if incomplete_path is None:
+                incomplete_path = candidate
+    if source_path is None:
+        if incomplete_path is not None:
+            raise RuntimeError(
+                f"Master MT5 WebRequest settings in {incomplete_path} are incomplete. Enable WebRequest "
+                "and add the bridge URLs in Tools > Options > Expert Advisors, then close MT5."
+            )
+        raise RuntimeError(
+            "Master MT5 WebRequest settings were not found. Open the master terminal in "
+            "portable mode, enable WebRequest in Tools > Options > Expert Advisors, add "
+            "the required bridge URLs, and close MT5 before starting the bridge."
+        )
+
+    target_path = folder / source_path.relative_to(Path(TERMINAL_MASTER))
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    if target_path.exists():
+        target_raw = target_path.read_bytes()
+        try:
+            target_text, encoding = _decode_text(target_raw)
+        except ValueError as exc:
+            raise RuntimeError(f"Could not read MT5 settings file {target_path}: {exc}") from exc
+        updated_text = _merge_expert_webrequest_settings(target_text, settings)
+        if updated_text != target_text:
+            target_path.write_bytes(updated_text.encode(encoding))
+    else:
+        shutil.copy2(source_path, target_path)
+
+    try:
+        synced_text, _ = _decode_text(target_path.read_bytes())
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"Could not verify managed MT5 settings file {target_path}: {exc}") from exc
+    if _expert_webrequest_settings(synced_text) != settings:
+        raise RuntimeError(f"Managed MT5 WebRequest settings did not match the master in {target_path}.")
+    return source_path, target_path, settings
+
+
 def sync_chart_token(chart_path: Path) -> None:
     """Force the EA token stored inside a student chart profile to the configured key."""
     token = os.environ.get("SKUD_EA_TOKEN") or os.environ.get("SKUD_BRIDGE_KEY") or ""
@@ -290,12 +437,16 @@ def ensure_terminal(account: dict) -> tuple[bool, str]:
     Returns (success, message). Never raises; HTTP handlers turn failures into messages.
     """
     login = str(account["login"])
-    if login in running_logins():
-        return True, "already running"
     folder = Path(account["folder_path"])
     exe = folder / "terminal64.exe"
     if not exe.exists():
         return False, f"terminal64.exe not found in {folder}"
+    if login in running_logins():
+        return True, "already running; restart the managed terminal to apply master MT5 setting changes"
+    try:
+        settings_source, settings_target, expert_settings = sync_master_webrequest_settings(folder)
+    except (OSError, RuntimeError) as exc:
+        return False, str(exc)[:300]
     role = str(account.get("role", "student") or "student")
     global _last_launch
     with _launch_lock:
@@ -309,8 +460,13 @@ def ensure_terminal(account: dict) -> tuple[bool, str]:
         # mbcs on Windows — ascii with errors="replace" would silently corrupt
         # any non-ASCII password character into "?" and the broker login fails.
         startup_encoding = "mbcs" if os.name == "nt" else "utf-8"
+        startup_configuration = (
+            f"[Common]\nLogin={login}\nPassword={account['password']}\n"
+            f"Server={account['server']}\n[Experts]\n"
+            + "".join(f"{key}={value}\n" for key, value in expert_settings)
+        )
         (folder / "startup.ini").write_text(
-            f"[Common]\r\nLogin={login}\r\nPassword={account['password']}\r\nServer={account['server']}\r\n",
+            startup_configuration,
             encoding=startup_encoding,
         )
         if role == "mentor":
@@ -323,6 +479,10 @@ def ensure_terminal(account: dict) -> tuple[bool, str]:
         if profile:
             launch_args.append(f"/profile:{profile}")
         subprocess.Popen(launch_args, cwd=str(folder), close_fds=True)
+        print(
+            f"SkuD MT5 WebRequest settings synced for login {login}: "
+            f"{settings_source} -> {settings_target}"
+        )
         return True, "; ".join(warnings) if warnings else "launched"
     except Exception as exc:
         return False, str(exc)[:200]

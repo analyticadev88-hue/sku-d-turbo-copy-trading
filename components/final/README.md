@@ -107,9 +107,10 @@ student slots directory.
    MetaEditor, enter the bridge key in its `EaToken` input, and compile with
    **F7**. Confirm
    `C:\skud\mt5-master\MQL5\Experts\SkuDTurboStudentEA.ex5` exists.
-3. Attach `SkuDTurboStudentEA` to a chart in the master template terminal. Set
-   `BridgeUrl` to `http://127.0.0.1:8765`, enable Algo Trading, and allow
-   WebRequest to `http://127.0.0.1:8765`.
+3. In the master terminal's Tools > Options > Expert Advisors, enable WebRequest
+   and add `http://127.0.0.1:8765`. If hosting mentor terminals on the VPS, also
+   add `https://skud.toporapula.dev`. Attach `SkuDTurboStudentEA` to a chart,
+   set `BridgeUrl` to `http://127.0.0.1:8765`, and enable Algo Trading.
 4. Save the chart profile as `SkuD`, then close the master terminal. Confirm
    `C:\skud\mt5-master\MQL5\Profiles\Charts\SkuD\chart01.chr` exists.
 5. Start the full bridge with `C:\skud\final\start-bridge.ps1` or start both
@@ -117,10 +118,15 @@ student slots directory.
    requires the compiled Student EA and saved chart to prevent starting empty
    student terminals.
 
-The Python bridge copies the compiled Student EA and chart file into each newly
-provisioned student terminal. Each slot receives its own `startup.ini` with that student's login,
-password, and broker server. Do not add student credentials to the master
-profile.
+The Python bridge copies the master terminal's Expert Advisors WebRequest
+settings into each managed terminal before launch and includes them in the
+slot's `/config` startup file, alongside that account's login details. This is
+necessary because the explicit startup file must also carry the WebRequest
+allowlist. Keep the master terminal closed after changing these settings so MT5
+has saved them. Existing running terminals must be restarted before changes
+take effect; use `.\start-bridge.ps1 -RefreshTerminals` to refresh all managed
+terminals. This briefly interrupts EA monitoring, but does not close positions
+held by the broker. Do not add account credentials to the master profile.
 
 Chart profile convention: save the profile on the master terminal **once** with
 all Deriv charts the Student EA should report (the EA covers 30 forex/metal
@@ -206,10 +212,14 @@ Set-Location C:\skud\final
 
 After the bridge health check succeeds, register the mentor through the
 protected `POST /api/admin/mentors` route using `SKUD_MENTOR_SETUP_CODE`. The
-The Mentor EA uses the platform `SKUD_BRIDGE_KEY`; managed terminals receive it
+Mentor EA uses the platform `SKUD_BRIDGE_KEY`; managed terminals receive it
 automatically. For a manually managed terminal, enter the same key in the EA's
-`BridgeKey` input. Compile the Mentor EA and allow WebRequest to
-`https://skud.toporapula.dev` in MT5.
+`BridgeKey` input. Compile the Mentor EA, set its `BridgeUrl` to
+`https://skud.toporapula.dev`, attach it to a chart in the master terminal, and
+save that chart profile as `Mentor`. The launcher prefers the
+`Mentor` profile when it auto-discovers chart templates. Allow WebRequest to
+`https://skud.toporapula.dev` in the master terminal's Expert Advisors options.
+Managed terminals inherit that allowlist from the master before launch.
 
 Enable demo enrollment only after mentor registration and the student EA/chart
 template are ready. Submit a Deriv demo login, trading password, and server from
