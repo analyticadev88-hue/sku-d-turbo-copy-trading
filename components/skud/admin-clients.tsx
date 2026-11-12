@@ -12,7 +12,8 @@ type AdminClient = {
   subscription: { status: string; expiresAt: string; mentorName: string } | null
 }
 
-type RowState = { busy: 'approve' | 'deactivate' | null; confirmDeactivate: boolean; message: string | null; error: boolean }
+type RowAction = 'approve' | 'deactivate' | 'delete'
+type RowState = { busy: RowAction | null; confirm: RowAction | null; message: string | null; error: boolean }
 
 function badgeFor(client: AdminClient): { label: string; className: string } {
   if (client.isAdmin) return { label: 'Admin', className: 'border-primary/40 text-primary' }
@@ -62,12 +63,12 @@ export function AdminClients() {
 
   function patchRow(id: string, patch: Partial<RowState>) {
     setRows((current) => {
-      const existing: RowState = current[id] ?? { busy: null, confirmDeactivate: false, message: null, error: false }
+      const existing: RowState = current[id] ?? { busy: null, confirm: null, message: null, error: false }
       return { ...current, [id]: { ...existing, ...patch } }
     })
   }
 
-  async function post(path: string, body: unknown, id: string, kind: RowState['busy']) {
+  async function post(path: string, body: unknown, id: string, kind: RowAction) {
     patchRow(id, { busy: kind, message: null })
     try {
       const { data: sessionData } = await getBrowserSupabase().auth.getSession()
@@ -81,9 +82,14 @@ export function AdminClients() {
         },
         body: JSON.stringify(body),
       })
-      const result = await response.json() as { error?: string }
+      const result = await response.json() as { revoked?: number; error?: string }
       if (!response.ok) throw new Error(result.error ?? 'The request failed.')
-      patchRow(id, { busy: null, message: kind === 'approve' ? 'Subscription updated.' : 'Subscription deactivated.', error: false })
+      const message = kind === 'approve'
+        ? 'Subscription updated.'
+        : kind === 'deactivate'
+          ? (result.revoked ?? 0) > 0 ? 'Subscription deactivated.' : 'No active subscription to revoke.'
+          : 'Account deleted.'
+      patchRow(id, { busy: null, confirm: null, message, error: false })
       await load(query.trim())
     } catch (error) {
       patchRow(id, { busy: null, message: error instanceof Error ? error.message : 'The request failed.', error: true })
@@ -94,13 +100,19 @@ export function AdminClients() {
     void post('/api/admin/clients/approve', { userId: client.id, durationMonths: months[client.id] ?? 1 }, client.id, 'approve')
   }
 
-  function deactivate(client: AdminClient) {
+  function confirmableAction(client: AdminClient, kind: 'deactivate' | 'delete') {
     const row = rows[client.id]
-    if (!row?.confirmDeactivate) {
-      patchRow(client.id, { confirmDeactivate: true })
+    if (row?.busy) return
+    if (row?.confirm !== kind) {
+      patchRow(client.id, { confirm: kind, message: null })
       return
     }
-    void post('/api/admin/clients/deactivate', { userId: client.id }, client.id, 'deactivate')
+    void post(
+      kind === 'deactivate' ? '/api/admin/clients/deactivate' : '/api/admin/clients/delete',
+      { userId: client.id },
+      client.id,
+      kind,
+    )
   }
 
   return (
@@ -175,11 +187,19 @@ export function AdminClients() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => deactivate(client)}
+                    onClick={() => confirmableAction(client, 'deactivate')}
                     disabled={row?.busy !== null && row?.busy !== undefined}
-                    className={`inline-flex min-h-9 items-center justify-center rounded-md border px-3 text-xs font-extrabold uppercase tracking-[0.08em] transition-colors disabled:cursor-wait disabled:opacity-60 ${row?.confirmDeactivate ? 'border-primary bg-primary/10 text-primary' : 'border-primary/50 text-primary hover:bg-primary/10'}`}
+                    className={`inline-flex min-h-9 items-center justify-center rounded-md border px-3 text-xs font-extrabold uppercase tracking-[0.08em] transition-colors disabled:cursor-wait disabled:opacity-60 ${row?.confirm === 'deactivate' ? 'border-primary bg-primary/10 text-primary' : 'border-primary/50 text-primary hover:bg-primary/10'}`}
                   >
-                    {row?.busy === 'deactivate' ? 'Deactivating…' : row?.confirmDeactivate ? 'Confirm?' : 'Deactivate'}
+                    {row?.busy === 'deactivate' ? 'Deactivating…' : row?.confirm === 'deactivate' ? 'Confirm?' : 'Deactivate'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => confirmableAction(client, 'delete')}
+                    disabled={row?.busy !== null && row?.busy !== undefined}
+                    className={`inline-flex min-h-9 items-center justify-center rounded-md px-3 text-xs font-extrabold uppercase tracking-[0.08em] transition-colors disabled:cursor-wait disabled:opacity-60 ${row?.confirm === 'delete' ? 'bg-white text-[#0b0b0d]' : 'bg-primary text-white hover:bg-primary/85'}`}
+                  >
+                    {row?.busy === 'delete' ? 'Deleting…' : row?.confirm === 'delete' ? 'Confirm?' : 'Delete'}
                   </button>
                 </div>
               )}

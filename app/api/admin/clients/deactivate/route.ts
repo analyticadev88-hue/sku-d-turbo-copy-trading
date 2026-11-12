@@ -22,6 +22,12 @@ export async function POST(request: Request) {
   if (!userId) return jsonError('Choose a user.', 400)
 
   try {
+    const user = await prisma.user.findUnique({ where: { id: userId } })
+    if (!user) return jsonError('User not found.', 404)
+    if (user.isAdmin || user.mentorId) {
+      return jsonError('Only client accounts can be deactivated.', 403)
+    }
+
     const result = await prisma.subscription.updateMany({
       where: { userId, status: 'ACTIVE' },
       data: { status: 'REVOKED' },
