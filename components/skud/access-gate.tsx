@@ -3,7 +3,6 @@
 import Image from 'next/image'
 import { useEffect, useState } from 'react'
 import { AccessFlow } from './access-flow'
-import { AccessStart } from './access-start'
 import { Dashboard } from './dashboard'
 import { GetStarted } from './get-started'
 import { InstallRequired } from './install-required'
@@ -23,9 +22,7 @@ function AccessSplash() {
   )
 }
 
-const PAYMENT_ORDER_KEY = 'skud-payment-order'
-
-type AccessState = 'pending' | 'approved' | 'rejected' | 'expired' | 'payment_required' | 'superseded' | 'error'
+type AccessState = 'pending' | 'approved' | 'rejected' | 'expired' | 'superseded' | 'error'
 
 function SignedOutElsewhere() {
   return (
@@ -56,20 +53,13 @@ function SignedOutElsewhere() {
   )
 }
 
-export function AccessGate({ preview, checkout, login }: { preview: boolean; checkout?: string; login?: boolean }) {
+export function AccessGate({ preview, login }: { preview: boolean; login?: boolean }) {
   const [access, setAccess] = useState<AccessState | null | undefined>(undefined)
-  const [orderId, setOrderId] = useState<string | undefined>()
   const [stored, setStored] = useState<StoredMt5Account | null>(null)
   const { installed } = usePwaInstall()
 
   useEffect(() => {
     if (preview) return
-
-    const query = new URLSearchParams(window.location.search)
-    const queryOrder = query.get('order_id') ?? undefined
-    const savedOrder = window.localStorage.getItem(PAYMENT_ORDER_KEY) ?? undefined
-    const activeOrder = queryOrder ?? savedOrder
-    setOrderId(activeOrder)
 
     let active = true
     async function loadAccess() {
@@ -106,7 +96,7 @@ export function AccessGate({ preview, checkout, login }: { preview: boolean; che
 
   if (installed === undefined || access === undefined) return <AccessSplash />
 
-  if (!installed && checkout !== 'returned') return <InstallRequired />
+  if (!installed) return <InstallRequired />
 
   if (access === 'superseded') return <SignedOutElsewhere />
 
@@ -123,15 +113,9 @@ export function AccessGate({ preview, checkout, login }: { preview: boolean; che
 
   if (access === 'approved') return stored ? <Dashboard /> : <GetStarted />
   if (access === 'pending' || access === 'rejected') {
-    return <AccessFlow initialAccessStatus={access} orderId={orderId} />
+    return <AccessFlow initialAccessStatus={access} />
   }
-  if (access === 'payment_required' && !orderId) {
-    return <AccessFlow initialAccessStatus="payment_required" />
-  }
-  if (orderId && (checkout === 'returned' || access === null || access === 'payment_required' || access === 'expired')) {
-    return <AccessFlow orderId={orderId} />
-  }
+  if (access === 'expired') return <AccessFlow initialAccessStatus="expired" />
   if (login) return <AccessFlow loginOnly />
-  if (access === 'expired') return <AccessStart />
   return <AccessFlow loginOnly />
 }

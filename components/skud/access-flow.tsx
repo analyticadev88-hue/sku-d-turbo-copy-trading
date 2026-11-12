@@ -1,125 +1,26 @@
 'use client'
 
-import Image from 'next/image'
-import { useEffect, useState, type FormEvent } from 'react'
-import { Eye, EyeOff, LoaderCircle } from 'lucide-react'
+import { useState, type FormEvent } from 'react'
+import { Eye, EyeOff } from 'lucide-react'
 import { getBrowserSupabase } from '@/lib/supabase'
 import { DerivMark } from './deriv-logo'
-import { SynthyardCheckoutDialog } from './synthyard-checkout'
 import { clearClientSessionId, loadClientSessionId, saveClientSessionId } from './client-session'
 
-type AccessStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'payment_required' | 'superseded'
+type AccessStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'superseded'
 
 export function AccessFlow({
-  orderId,
   initialAccessStatus,
   loginOnly = false,
 }: {
-  orderId?: string
   initialAccessStatus?: AccessStatus
   loginOnly?: boolean
 }) {
-  const [paymentStatus, setPaymentStatus] = useState<
-    'checking' | 'pending' | 'unverified' | 'paid' | 'failed'
-  >(
-    orderId ? 'checking' : 'paid',
-  )
-  const [mode, setMode] = useState<'signup' | 'login'>(loginOnly || !orderId ? 'login' : 'signup')
+  const [mode, setMode] = useState<'signup' | 'login'>(loginOnly ? 'login' : 'signup')
   const [accessStatus, setAccessStatus] = useState<AccessStatus | null>(initialAccessStatus ?? null)
   const [expiresAt, setExpiresAt] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
-  const [checkoutOpen, setCheckoutOpen] = useState(false)
-
-  useEffect(() => {
-    if (!orderId) return
-    const currentOrderId = orderId
-    const verificationTimeoutMs = 60_000
-    const startedAt = Date.now()
-    let active = true
-    let timer: ReturnType<typeof setTimeout> | undefined
-
-    function setUnverifiedIfTimedOut() {
-      if (Date.now() - startedAt < verificationTimeoutMs) return false
-      setPaymentStatus('unverified')
-      return true
-    }
-
-    function scheduleNextCheck() {
-      const delay = Date.now() - startedAt >= verificationTimeoutMs ? 15_000 : 4_000
-      timer = setTimeout(poll, delay)
-    }
-
-    async function poll() {
-      try {
-        const response = await fetch(`/api/payments/status?order_id=${encodeURIComponent(currentOrderId)}`, {
-          cache: 'no-store',
-        })
-        const result = await response.json() as { status?: string; error?: string }
-        if (!response.ok) throw new Error(result.error ?? 'Could not check payment status.')
-        if (!active) return
-        if (result.status === 'PAID') setPaymentStatus('paid')
-        else if (result.status === 'FAILED') {
-          window.localStorage.removeItem('skud-payment-order')
-          setPaymentStatus('failed')
-        } else {
-          if (!setUnverifiedIfTimedOut()) setPaymentStatus('pending')
-          scheduleNextCheck()
-        }
-      } catch (error) {
-        if (!active) return
-        if (!setUnverifiedIfTimedOut()) setPaymentStatus('pending')
-        setMessage(error instanceof Error ? error.message : 'Could not check payment status.')
-        scheduleNextCheck()
-      }
-    }
-
-    void poll()
-    return () => {
-      active = false
-      if (timer) clearTimeout(timer)
-    }
-  }, [orderId])
-
-  useEffect(() => {
-    if (!orderId || paymentStatus !== 'paid') return
-    let active = true
-
-    async function linkPaidOrder() {
-      try {
-        const { data } = await getBrowserSupabase().auth.getSession()
-        const token = data.session?.access_token
-        if (!token) return
-        const response = await fetch('/api/access', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            'x-session-id': loadClientSessionId() ?? '',
-          },
-          body: JSON.stringify({ orderId }),
-        })
-        const result = await response.json() as { status?: AccessStatus; expiresAt?: string; error?: string }
-        if (!response.ok) throw new Error(result.error ?? 'Could not link the confirmed payment.')
-        if (!active) return
-        window.localStorage.removeItem('skud-payment-order')
-        setAccessStatus(result.status ?? null)
-        setExpiresAt(result.expiresAt ?? null)
-        if (result.status === 'superseded') {
-          setMessage('This account is active on another device. Sign in again to continue.')
-        }
-        if (result.status === 'pending') {
-          setMessage('Payment linked. A mentor must approve your subscription before you can enter the app.')
-        }
-      } catch (error) {
-        if (active) setMessage(error instanceof Error ? error.message : 'Could not link the confirmed payment.')
-      }
-    }
-
-    void linkPaidOrder()
-    return () => { active = false }
-  }, [orderId, paymentStatus])
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -159,15 +60,7 @@ export function AccessFlow({
         // Best-effort: enforcement starts on the next successful mint.
       }
 
-      const response = await fetch('/api/access', orderId ? {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-          'x-session-id': loadClientSessionId() ?? '',
-        },
-        body: JSON.stringify({ orderId }),
-      } : {
+      const response = await fetch('/api/access', {
         headers: {
           Authorization: `Bearer ${session.access_token}`,
           'x-session-id': loadClientSessionId() ?? '',
@@ -181,14 +74,13 @@ export function AccessFlow({
       }
       if (access.status === 'superseded') throw new Error('This account is active on another device. Please sign in again.')
       if (!response.ok) throw new Error(access.error ?? 'Could not register your account.')
-      window.localStorage.removeItem('skud-payment-order')
       setAccessStatus(access.status)
       if (access.status === 'approved') {
         setExpiresAt(access.expiresAt ?? null)
         window.setTimeout(() => window.location.assign('/dashboard'), 1200)
       }
       if (access.status === 'pending') {
-        setMessage('Your payment is confirmed. A mentor must approve your account before you can enter SkuD Turbo.')
+        setMessage('Your account is registered. A mentor must approve it before you can enter SkuD Turbo.')
       }
       // Single active session per account: end every other signed-in device.
       try {
@@ -231,65 +123,11 @@ export function AccessFlow({
       if (access.status === 'approved') {
         window.setTimeout(() => window.location.assign('/dashboard'), 1200)
       }
-      if (access.status === 'payment_required') setMessage('No paid setup is linked to this account yet.')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not check approval status.')
     } finally {
       setBusy(false)
     }
-  }
-
-  if (paymentStatus !== 'paid') {
-    return (
-      <main className="flex min-h-dvh flex-col items-center justify-center bg-[#0b0b0d] px-5 text-center text-white">
-        <Image src="/logo-synth.webp" alt="Synthyard EA Hosting" width={72} height={72} priority className="size-16 rounded-2xl object-cover" />
-        <p className="mt-5 text-xs font-extrabold uppercase tracking-[0.25em] text-white/75">Synthyard EA Hosting</p>
-        <h1 className="mt-6 text-2xl font-bold">
-          {paymentStatus === 'failed'
-            ? 'Payment not completed'
-            : paymentStatus === 'unverified'
-              ? 'Payment not verified yet'
-              : 'Confirming your payment'}
-        </h1>
-        <p className="mt-3 max-w-sm text-sm leading-relaxed text-white/55">
-          {paymentStatus === 'failed'
-            ? 'Whop reported that this payment did not complete. You can try again below.'
-            : paymentStatus === 'unverified'
-              ? 'We could not confirm your payment yet. If you were charged, do not pay again. We will keep checking automatically; if you canceled checkout, you can try again below.'
-              : 'We’re checking with Synthyard for your payment confirmation. This usually takes a few seconds.'}
-        </p>
-        {message && <p role="status" className="mt-4 max-w-sm text-xs text-white/45">{message}</p>}
-        {(paymentStatus === 'checking' || paymentStatus === 'pending') && (
-          <LoaderCircle className="mt-6 size-6 animate-spin text-primary" aria-label="Checking payment status" />
-        )}
-        {(paymentStatus === 'unverified' || paymentStatus === 'failed') && (
-          <div className="mt-6 flex flex-col items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setCheckoutOpen(true)}
-              className="rounded-md bg-primary px-4 py-2 text-sm font-bold text-primary-foreground hover:bg-primary/85"
-            >
-              {paymentStatus === 'failed'
-                ? 'Try payment again'
-                : 'I canceled or was not charged — try again'}
-            </button>
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={() => {
-            window.localStorage.removeItem('skud-payment-order')
-            window.location.assign('/dashboard?login=1')
-          }}
-          className="mt-3 text-xs font-bold uppercase tracking-[0.14em] text-white/45 transition-colors hover:text-white"
-        >
-          Back to sign in
-        </button>
-        {(paymentStatus === 'unverified' || paymentStatus === 'failed') && (
-          <SynthyardCheckoutDialog open={checkoutOpen} onOpenChange={setCheckoutOpen} />
-        )}
-      </main>
-    )
   }
 
   if (accessStatus === 'pending' || accessStatus === 'rejected') {
@@ -306,7 +144,7 @@ export function AccessFlow({
         </h1>
         <p className="mt-3 max-w-md text-sm leading-relaxed text-white/55">
           {accessStatus === 'pending'
-            ? 'Your account is registered. A mentor must approve your subscription before the dashboard becomes available.'
+            ? 'Your account is registered. A mentor must approve it before the dashboard becomes available.'
             : 'Please contact your mentor for more information about this account.'}
         </p>
         <div className="mt-6 flex gap-3">
@@ -354,43 +192,6 @@ export function AccessFlow({
     )
   }
 
-  if (accessStatus === 'payment_required') {
-    return (
-      <main className="relative isolate flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-[#0b0b0d] px-5 text-center text-white">
-        <div
-          className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_80%_15%,rgba(255,68,79,0.12),transparent_48%)]"
-          aria-hidden="true"
-        />
-        <DerivMark className="size-12 rounded-xl text-2xl" />
-        <p className="mt-5 text-xs font-extrabold uppercase tracking-[0.25em] text-primary">SkuD Turbo</p>
-        <h1 className="mt-4 text-2xl font-extrabold">Complete your setup</h1>
-        <p className="mt-3 max-w-sm text-sm leading-relaxed text-white/55">
-          Your account is ready. Pay the one-time $13 USD server setup fee to Synthyard, then a mentor
-          can approve your access.
-        </p>
-        <button
-          type="button"
-          onClick={() => setCheckoutOpen(true)}
-          className="mt-6 inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-primary px-5 text-sm font-extrabold text-white transition-colors hover:bg-primary/85"
-        >
-          Review Synthyard payment
-        </button>
-        <button
-          type="button"
-          onClick={async () => {
-            clearClientSessionId()
-            await getBrowserSupabase().auth.signOut()
-            window.location.assign('/dashboard')
-          }}
-          className="mt-5 text-xs font-bold uppercase tracking-[0.14em] text-white/45 transition-colors hover:text-white"
-        >
-          Sign out
-        </button>
-        <SynthyardCheckoutDialog open={checkoutOpen} onOpenChange={setCheckoutOpen} />
-      </main>
-    )
-  }
-
   if (accessStatus === 'expired') {
     return (
       <main className="relative isolate flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-[#0b0b0d] px-5 text-center text-white">
@@ -402,11 +203,25 @@ export function AccessFlow({
         <p className="mt-5 text-xs font-extrabold uppercase tracking-[0.25em] text-primary">SkuD Turbo</p>
         <h1 className="mt-4 text-2xl font-bold">Subscription expired</h1>
         <p className="mt-3 max-w-sm text-sm leading-relaxed text-white/60">
-          Renew your hosting setup, then ask a mentor to approve the next subscription period.
+          Your access period has ended. Ask your mentor to renew your subscription, then check again.
         </p>
-        <a href="/dashboard" className="mt-6 rounded-md bg-primary px-5 py-3 text-sm font-extrabold text-white transition-colors hover:bg-primary/85">
-          Renew access
-        </a>
+        <div className="mt-6 flex gap-3">
+          <button type="button" disabled={busy} onClick={() => void refreshApproval()} className="rounded-md bg-primary px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+            {busy ? 'Checking...' : 'Check again'}
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              clearClientSessionId()
+              await getBrowserSupabase().auth.signOut()
+              window.location.assign('/dashboard?login=1')
+            }}
+            className="rounded-md border border-white/15 px-4 py-2.5 text-sm font-bold text-white/75 transition-colors hover:text-white"
+          >
+            Sign out
+          </button>
+        </div>
+        {message && <p role="status" className="mt-4 max-w-sm text-xs text-white/45">{message}</p>}
       </main>
     )
   }
@@ -425,9 +240,7 @@ export function AccessFlow({
         <h1 className="mt-8 text-center text-3xl font-extrabold">{mode === 'signup' ? 'Create your account' : 'Sign in'}</h1>
         <p className="mt-3 text-center text-sm leading-relaxed text-white/55">
           {mode === 'signup'
-            ? orderId
-              ? 'Payment is confirmed. Create the account your mentor will approve.'
-              : 'Create your account, then complete the hosting payment to get access.'
+            ? 'Create your account, then a mentor approves your access — no payment needed from you.'
             : 'Sign in to your mentor-approved SkuD Turbo account.'}
         </p>
         <form onSubmit={handleAuth} className="mt-6 flex flex-col gap-4">
