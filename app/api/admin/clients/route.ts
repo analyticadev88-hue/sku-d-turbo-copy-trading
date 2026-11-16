@@ -13,22 +13,32 @@ export async function GET(request: Request) {
   const q = url.searchParams.get('q')?.trim() ?? ''
 
   try {
-    const users = await prisma.user.findMany({
-      // Staff accounts (admins, mentors) are not clients and never carry a
-      // subscription; listing them here only causes "expired" confusion.
-      where: q
-        ? { email: { contains: q, mode: 'insensitive' }, isAdmin: false, mentorId: null }
-        : { isAdmin: false, mentorId: null },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-      include: {
-        subscriptions: {
-          where: { status: 'ACTIVE', expiresAt: { gt: new Date() } },
-          orderBy: { expiresAt: 'desc' },
-          take: 1,
+    const [users, total, approved] = await Promise.all([
+      prisma.user.findMany({
+        // Staff accounts (admins, mentors) are not clients and never carry a
+        // subscription; listing them here only causes "expired" confusion.
+        where: q
+          ? { email: { contains: q, mode: 'insensitive' }, isAdmin: false, mentorId: null }
+          : { isAdmin: false, mentorId: null },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        include: {
+          subscriptions: {
+            where: { status: 'ACTIVE', expiresAt: { gt: new Date() } },
+            orderBy: { expiresAt: 'desc' },
+            take: 1,
+          },
         },
-      },
-    })
+      }),
+      prisma.user.count({ where: { isAdmin: false, mentorId: null } }),
+      prisma.user.count({
+        where: {
+          isAdmin: false,
+          mentorId: null,
+          subscriptions: { some: { status: 'ACTIVE', expiresAt: { gt: new Date() } } },
+        },
+      }),
+    ])
     const clients = users.map((user) => {
       const subscription = user.subscriptions[0] ?? null
       return {
@@ -45,7 +55,10 @@ export async function GET(request: Request) {
           : null,
       }
     })
-    return Response.json({ clients }, { headers: { 'Cache-Control': 'no-store' } })
+    return Response.json(
+      { clients, totals: { total, approved, awaiting: total - approved } },
+      { headers: { 'Cache-Control': 'no-store' } },
+    )
   } catch {
     return jsonError('Could not load clients.', 503)
   }

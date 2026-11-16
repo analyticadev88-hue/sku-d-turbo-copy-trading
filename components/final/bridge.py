@@ -512,11 +512,29 @@ def validate_mentor_event(payload: object) -> dict:
     return result
 
 
-def scale_follower_volume(db: sqlite3.Connection, follower: sqlite3.Row, symbol: str, event_volume: float) -> float:
-    """Scale a mentor trade by the follower's volume_multiplier and clamp it to
-    the broker volume limits that follower's terminal last reported (falling back
-    to a sane [0.01, 100] window), rounding to the symbol's volume step."""
-    scaled = event_volume * follower["volume_multiplier"]
+def scale_follower_volume(db: sqlite3.Connection, follower: sqlite3.Row, symbol: str, event_volume: float, mentor_login: str | None = None) -> float:
+    """Scale a mentor trade for one follower.
+
+    The volume follows the follower's balance relative to the mentor's balance,
+    multiplied by the admin's volume_multiplier — so a small account is never
+    assigned mentor-sized lots. When either balance is unknown (no heartbeat yet)
+    it falls back to the multiplier alone. The result is clamped to the broker
+    volume limits that follower's terminal last reported (falling back to a sane
+    [0.01, 100] window), rounding to the symbol's volume step; a proportional
+    volume below the broker minimum is raised to the minimum so the follower never
+    misses the trade — the broker's margin check stays the final gate."""
+    multiplier = float(follower["volume_multiplier"] or 1)
+    scaled = event_volume * multiplier
+    if mentor_login:
+        balances = db.execute(
+            "SELECT (SELECT balance FROM terminal_status WHERE login=?) AS mentor_balance,"
+            "        (SELECT balance FROM terminal_status WHERE login=?) AS follower_balance",
+            (mentor_login, follower["login"]),
+        ).fetchone()
+        mentor_balance = balances["mentor_balance"] if balances else None
+        follower_balance = balances["follower_balance"] if balances else None
+        if mentor_balance is not None and follower_balance is not None and mentor_balance > 0:
+            scaled = event_volume * (follower_balance / mentor_balance) * multiplier
     limits = db.execute(
         "SELECT volume_min,volume_max,volume_step FROM prices WHERE login=? AND symbol=?",
         (follower["login"], symbol),
@@ -990,7 +1008,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                         (event["mentor_id"], event["login"]),
                     ).fetchall()
                     for follower in followers:
-                        volume = scale_follower_volume(db, follower, event["symbol"], event["volume"])
+                        volume = scale_follower_volume(db, follower, event["symbol"], event["volume"], event["login"])
                         db.execute(
                             "INSERT INTO orders(id,login,symbol,order_type,volume,entry_price,tp_enabled,tp_distance,"
                             "sl_enabled,sl_distance,status,mentor_id,mentor_name,source_event_id,source_position_id,created_at,updated_at) "

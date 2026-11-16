@@ -128,6 +128,15 @@ take effect; use `.\start-bridge.ps1 -RefreshTerminals` to refresh all managed
 terminals. This briefly interrupts EA monitoring, but does not close positions
 held by the broker. Do not add account credentials to the master profile.
 
+Before starting a managed terminal that is not already running, the bridge
+replaces the slot's contents with a clean copy of the current master template
+(`terminal_manager.refresh_slot_from_master`). This refreshes MT5 options and
+terminal files while removing the previous account's local state, so every
+launch behaves like a fresh MT5 install fed by the master. Slot folders are
+disposable — deleting `C:\skud\terminals\Slot*` manually is safe and they are
+re-created from the master on the next launch. The slot's own `startup.ini` is
+rewritten at launch; the master's `startup.ini` is never copied.
+
 Chart profile convention: save the profile on the master terminal **once** with
 all Deriv charts the Student EA should report (the EA covers 30 forex/metal
 symbols plus 19 synthetic indices by their MT5 full names). The bridge copies
@@ -269,10 +278,19 @@ usual and never copies to its own account (fan-out skips the source login).
 
 Every follower account carries a `volume_multiplier` (0.01-100, default 1) and
 a `role` (`student`, default, or `mentor`). When a mentor open event fans out,
-each follower's order volume is `event volume x multiplier`, then clamped and
+each follower's order volume is scaled **proportionally to balance** —
+
+`event volume x (follower balance / mentor balance) x volume_multiplier`
+
+— using the balances both terminals last reported in their heartbeats
+(`POST /v1/terminal/status`). Until a heartbeat arrives the bridge falls back to
+`event volume x multiplier` alone. The scaled volume is then clamped and
 step-rounded using the volume_min/volume_max/volume_step that follower's
 terminal last reported for the symbol (via `POST /v1/prices`); with no report
-the volume is clamped to [0.01, 100].
+the volume is clamped to [0.01, 100]. A proportional volume below the broker
+minimum is raised to the minimum so the follower never misses a trade — the
+broker's margin check remains the final gate. Balances are compared as
+reported, so keep mentor and follower accounts in the same currency.
 
 Additional endpoints (all require the bridge key except where noted):
 

@@ -52,7 +52,9 @@ export async function POST(request: Request) {
         Authorization: `Bearer ${bridgeKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ login, password, server, mentor_id: mentorId }),
+      // Always enroll as a student: an account previously registered as the
+      // mentor must be demoted back to student when it re-enrolls here.
+      body: JSON.stringify({ login, password, server, mentor_id: mentorId, role: 'student' }),
       cache: 'no-store',
       signal: AbortSignal.timeout(20_000),
     })

@@ -14,6 +14,7 @@ type AdminClient = {
 
 type RowAction = 'approve' | 'deactivate' | 'delete'
 type RowState = { busy: RowAction | null; confirm: RowAction | null; message: string | null; error: boolean }
+type ClientsTotals = { total: number; approved: number; awaiting: number }
 
 function badgeFor(client: AdminClient): { label: string; className: string } {
   if (client.isAdmin) return { label: 'Admin', className: 'border-primary/40 text-primary' }
@@ -26,6 +27,7 @@ function badgeFor(client: AdminClient): { label: string; className: string } {
 export function AdminClients() {
   const [query, setQuery] = useState('')
   const [clients, setClients] = useState<AdminClient[] | null>(null)
+  const [totals, setTotals] = useState<ClientsTotals | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   const [rows, setRows] = useState<Record<string, RowState>>({})
   const [months, setMonths] = useState<Record<string, number>>({})
@@ -41,9 +43,10 @@ export function AdminClients() {
         headers: { 'x-supabase-access-token': accessToken },
         cache: 'no-store',
       })
-      const result = await response.json() as { clients?: AdminClient[]; error?: string }
+      const result = await response.json() as { clients?: AdminClient[]; totals?: ClientsTotals; error?: string }
       if (!response.ok) throw new Error(result.error ?? 'Could not load clients.')
       setClients(Array.isArray(result.clients) ? result.clients : [])
+      setTotals(result.totals ?? null)
     } catch (loadError) {
       setClients(null)
       setListError(loadError instanceof Error ? loadError.message : 'Could not load clients.')
@@ -120,6 +123,25 @@ export function AdminClients() {
       <p className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-muted-foreground">Client accounts</p>
       <h1 className="mt-2 text-xl font-extrabold tracking-normal">Clients</h1>
 
+      {totals ? (
+        <div className="mt-4 grid grid-cols-3 gap-3">
+          <div className="rounded-xl border border-white/15 bg-[#111114] p-3 text-center">
+            <p className="text-2xl font-extrabold text-white">{totals.total}</p>
+            <p className="mt-1 text-[9px] font-extrabold uppercase tracking-[0.14em] text-white/45">Total clients</p>
+          </div>
+          <div className="rounded-xl border border-[#4bb543]/40 bg-[#111114] p-3 text-center">
+            <p className="text-2xl font-extrabold text-[#4bb543]">{totals.approved}</p>
+            <p className="mt-1 text-[9px] font-extrabold uppercase tracking-[0.14em] text-white/45">Approved</p>
+          </div>
+          <div className="rounded-xl border border-white/15 bg-[#111114] p-3 text-center">
+            <p className="text-2xl font-extrabold text-white/80">{totals.awaiting}</p>
+            <p className="mt-1 text-[9px] font-extrabold uppercase tracking-[0.14em] text-white/45">Not approved</p>
+          </div>
+        </div>
+      ) : (
+        <p className="mt-4 text-xs text-white/45">Loading clients…</p>
+      )}
+
       <div className="relative mt-4">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-white/40" aria-hidden="true" />
         <input
@@ -130,10 +152,6 @@ export function AdminClients() {
           className="h-11 w-full rounded-md border border-white/15 bg-[#1a1a1e] pl-9 pr-3 text-sm text-white placeholder:text-white/35 outline-none focus-visible:border-primary focus-visible:ring-3 focus-visible:ring-ring/50"
         />
       </div>
-
-      <p className="mt-3 text-xs text-white/45">
-        {clients === null ? 'Loading clients…' : `${clients.length} client${clients.length === 1 ? '' : 's'}`}
-      </p>
 
       {listError && (
         <div className="mt-4 rounded-xl border border-primary/40 bg-[#111114] p-4">

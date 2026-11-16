@@ -766,6 +766,53 @@ class BridgeTests(unittest.TestCase):
             row = db.execute("SELECT volume FROM orders WHERE status='queued'").fetchone()
         self.assertAlmostEqual(row["volume"], 0.05)
 
+    def test_mentor_open_event_scales_proportionally_to_balance(self):
+        self.register_mentor()
+        self.provision(login="987654", server="OtherBroker-Demo", role="mentor")
+        self.provision(login="111111", mentor_id="mentor-skud-01")
+        self.provision(login="222222", mentor_id="mentor-skud-01")
+        # Mentor balance 700; small follower 10; mid follower 70.
+        self.request("/v1/terminal/status", "POST", BRIDGE_KEY,
+                     {"login": "987654", "connected": True, "message": "MT5 login successful",
+                      "server": "DerivSVG-Server-02", "balance": 700, "currency": "USD"})
+        for login, balance in (("111111", 10), ("222222", 70)):
+            self.request("/v1/terminal/status", "POST", "test-ea-token",
+                         {"login": login, "connected": True, "message": "MT5 login successful",
+                          "server": "DerivSVG-Server-02", "balance": balance, "currency": "USD"})
+        status, body = self.mentor_event()
+        self.assertEqual(status, 202)
+        self.assertEqual(json.loads(body)["queued"], 2)
+        with bridge.db_session() as db:
+            rows = db.execute("SELECT login,volume FROM orders WHERE status='queued'").fetchall()
+        volumes = {row["login"]: row["volume"] for row in rows}
+        # 0.1 * (10/700) = 0.0014 -> below the 0.01 fallback minimum, raised so
+        # the small follower still gets the trade (the broker margin-checks it).
+        self.assertAlmostEqual(volumes["111111"], 0.01)
+        # 0.1 * (70/700) = 0.01.
+        self.assertAlmostEqual(volumes["222222"], 0.01)
+
+    def test_mentor_open_event_balance_scaling_respects_multiplier_and_caps(self):
+        self.register_mentor()
+        self.provision(login="987654", server="OtherBroker-Demo", role="mentor")
+        self.provision(login="111111", mentor_id="mentor-skud-01", volume_multiplier=10)
+        self.request("/v1/terminal/status", "POST", BRIDGE_KEY,
+                     {"login": "987654", "connected": True, "message": "MT5 login successful",
+                      "server": "DerivSVG-Server-02", "balance": 1000, "currency": "USD"})
+        self.request("/v1/terminal/status", "POST", "test-ea-token",
+                     {"login": "111111", "connected": True, "message": "MT5 login successful",
+                      "server": "DerivSVG-Server-02", "balance": 500, "currency": "USD"})
+        status, _ = self.request("/v1/prices", "POST", "test-ea-token",
+                                 {"login": "111111", "ticks": [{"symbol": "EURUSD", "bid": 1.1, "ask": 1.2,
+                                                                "volume_min": 0.01, "volume_max": 0.2,
+                                                                "volume_step": 0.01}]})
+        self.assertEqual(status, 200)
+        status, body = self.mentor_event()
+        self.assertEqual(status, 202)
+        with bridge.db_session() as db:
+            row = db.execute("SELECT volume FROM orders WHERE status='queued'").fetchone()
+        # 0.1 * (500/1000) * 10 = 0.5 -> clamped to the reported 0.2 maximum.
+        self.assertAlmostEqual(row["volume"], 0.2)
+
     def test_mentors_list_and_detail_shapes(self):
         self.assertEqual(self.register_mentor()[0], 200)
         self.provision(login="111111", mentor_id="mentor-skud-01")
@@ -920,6 +967,42 @@ class BridgeTests(unittest.TestCase):
             result = bridge.tm._discover_chart_template("SkuDTurboMentorEA", "Mentor")
 
         self.assertEqual(result, str(mentor))
+
+    def test_refresh_slot_from_master_replaces_stale_files(self):
+        master = Path(self.temp_dir.name) / "refresh-master"
+        slot = Path(self.temp_dir.name) / "refresh-slot"
+        (master / "MQL5").mkdir(parents=True)
+        (master / "terminal64.exe").write_text("exe", encoding="utf-8")
+        (master / "startup.ini").write_text("[Common]\nLogin=111\n", encoding="utf-8")
+        (master / "MQL5" / "options.txt").write_text("fresh options", encoding="utf-8")
+        slot.mkdir(parents=True)
+        (slot / "terminal64.exe").write_text("exe", encoding="utf-8")
+        (slot / "startup.ini").write_text("[Common]\nLogin=222\n", encoding="utf-8")
+        stale_chart = slot / "MQL5" / "Profiles" / "Charts" / "OldAccount"
+        stale_chart.mkdir(parents=True)
+        (stale_chart / "old.chr").write_text("old", encoding="utf-8")
+
+        with patch.object(bridge.tm, "TERMINAL_MASTER", str(master)):
+            note = bridge.tm.refresh_slot_from_master(slot)
+
+        self.assertEqual(note, "refreshed from master")
+        self.assertEqual((slot / "MQL5" / "options.txt").read_text(encoding="utf-8"), "fresh options")
+        self.assertFalse(stale_chart.exists())
+        # The slot's own startup.ini is rewritten at launch; the master's never copied.
+        self.assertEqual((slot / "startup.ini").read_text(encoding="utf-8"), "[Common]\nLogin=222\n")
+
+    def test_refresh_slot_without_master_keeps_existing(self):
+        slot = Path(self.temp_dir.name) / "refresh-nomaster"
+        slot.mkdir(parents=True)
+        (slot / "terminal64.exe").write_text("exe", encoding="utf-8")
+        keep = slot / "keep.txt"
+        keep.write_text("keep", encoding="utf-8")
+
+        with patch.object(bridge.tm, "TERMINAL_MASTER", str(Path(self.temp_dir.name) / "missing-master")):
+            note = bridge.tm.refresh_slot_from_master(slot)
+
+        self.assertIn("kept existing slot", note)
+        self.assertTrue(keep.exists())
 
 
 if __name__ == "__main__":
