@@ -1,11 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { DotLottieReact } from '@lottiefiles/dotlottie-react'
 import {
   ArrowRight,
   House,
+  LifeBuoy,
   LogOut,
+  RefreshCw,
   UserRound,
 } from 'lucide-react'
 import { getBrowserSupabase } from '@/lib/supabase'
@@ -37,7 +39,7 @@ function greetingForHour(hour: number) {
   return 'Good evening'
 }
 
-type DashboardProps = { preview?: boolean }
+type DashboardProps = { preview?: boolean; membershipExpiresAt?: string }
 type Tab = 'home' | 'profile'
 type LiveMt5Account = { login: string; server: string; statusToken: string }
 type Mt5Status = {
@@ -45,9 +47,11 @@ type Mt5Status = {
   balance?: number
   currency?: string
   message?: string
+  state?: string
+  balance_updated_at?: number | null
 }
 
-export function Dashboard({ preview = false }: DashboardProps) {
+export function Dashboard({ preview = false, membershipExpiresAt }: DashboardProps) {
   const [tab, setTab] = useState<Tab>('home')
   const [accountConnected, setAccountConnected] = useState(preview)
   const [mentorId, setMentorId] = useState(preview ? DEFAULT_MENTOR_ID : 'Pending setup')
@@ -56,6 +60,9 @@ export function Dashboard({ preview = false }: DashboardProps) {
   const [accountDialogOpen, setAccountDialogOpen] = useState(false)
   const [accountSheetOpen, setAccountSheetOpen] = useState(false)
   const [userEmail, setUserEmail] = useState<string | null>(null)
+  const [statusRefreshing, setStatusRefreshing] = useState(false)
+  const statusRequestInFlight = useRef(false)
+  const manualStatusRefresh = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     if (preview) return
@@ -68,6 +75,9 @@ export function Dashboard({ preview = false }: DashboardProps) {
 
   const greeting = greetingForHour(new Date().getHours())
   const firstName = preview ? 'Skud' : firstNameFromEmail(userEmail)
+  const hasConfirmedBalance = Boolean(
+    liveStatus?.terminal_connected && typeof liveStatus.balance === 'number',
+  )
 
   useEffect(() => {
     if (preview) return
@@ -87,6 +97,9 @@ export function Dashboard({ preview = false }: DashboardProps) {
     let interval: ReturnType<typeof setInterval> | undefined
 
     async function refreshStatus() {
+      if (statusRequestInFlight.current) return
+      statusRequestInFlight.current = true
+      setStatusRefreshing(true)
       try {
         const { data: sessionData } = await getBrowserSupabase().auth.getSession()
         const accessToken = sessionData.session?.access_token
@@ -108,16 +121,27 @@ export function Dashboard({ preview = false }: DashboardProps) {
         if (active) setLiveStatus(result)
       } catch {
         if (active) setLiveStatus({ message: 'Could not reach the MT5 status service.' })
+      } finally {
+        statusRequestInFlight.current = false
+        if (active) setStatusRefreshing(false)
       }
     }
 
-    void refreshStatus()
-    interval = setInterval(() => void refreshStatus(), 5_000)
+    manualStatusRefresh.current = () => { void refreshStatus() }
+
+    if (!hasConfirmedBalance) {
+      void refreshStatus()
+      interval = setInterval(() => {
+        if (document.visibilityState === 'visible') void refreshStatus()
+      }, 5_000)
+    }
+
     return () => {
       active = false
       if (interval) clearInterval(interval)
+      manualStatusRefresh.current = null
     }
-  }, [liveAccount])
+  }, [liveAccount, hasConfirmedBalance])
 
   async function signOut() {
     setAccountSheetOpen(false)
@@ -179,9 +203,18 @@ export function Dashboard({ preview = false }: DashboardProps) {
           onConnect={openAccountDialog}
           onSignOut={signOut}
           onAccountDetails={() => setAccountSheetOpen(true)}
+          onRefreshStatus={() => manualStatusRefresh.current?.()}
+          statusRefreshing={statusRefreshing}
         />
       ) : (
-        <ProfileView preview={preview} mentorId={mentorId} firstName={firstName} userEmail={userEmail} onSignOut={signOutOfApp} />
+        <ProfileView
+          preview={preview}
+          mentorId={mentorId}
+          firstName={firstName}
+          userEmail={userEmail}
+          membershipExpiresAt={membershipExpiresAt}
+          onSignOut={signOutOfApp}
+        />
       )}
 
       <nav
@@ -272,6 +305,8 @@ function HomeView({
   onConnect,
   onSignOut,
   onAccountDetails,
+  onRefreshStatus,
+  statusRefreshing,
 }: {
   preview: boolean
   accountConnected: boolean
@@ -283,6 +318,8 @@ function HomeView({
   onConnect: () => void
   onSignOut: () => void
   onAccountDetails: () => void
+  onRefreshStatus: () => void
+  statusRefreshing: boolean
 }) {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col bg-[#0b0b0d]">
@@ -333,6 +370,18 @@ function HomeView({
                 </p>
               </div>
               {preview && <span className="pb-1 text-[8px] font-bold uppercase tracking-[0.1em] text-white/35">Sample</span>}
+              {!preview && (
+                <button
+                  type="button"
+                  onClick={onRefreshStatus}
+                  disabled={statusRefreshing}
+                  className="inline-flex min-h-9 items-center gap-1.5 rounded-sm border border-white/15 px-2.5 text-[9px] font-extrabold uppercase tracking-[0.08em] text-white/70 transition-colors hover:border-primary/50 hover:text-white disabled:cursor-wait disabled:opacity-50"
+                  aria-label="Refresh MT5 balance and connection status"
+                >
+                  <RefreshCw className={`size-3.5 ${statusRefreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
+                  Refresh
+                </button>
+              )}
             </div>
           )}
           <div className="flex min-h-[58px] items-center justify-between gap-3">
@@ -349,10 +398,29 @@ function HomeView({
   )
 }
 
-function ProfileView({ preview, mentorId, firstName, userEmail, onSignOut }: { preview: boolean; mentorId: string; firstName: string; userEmail: string | null; onSignOut: () => void }) {
+function ProfileView({
+  preview,
+  mentorId,
+  firstName,
+  userEmail,
+  membershipExpiresAt,
+  onSignOut,
+}: {
+  preview: boolean
+  mentorId: string
+  firstName: string
+  userEmail: string | null
+  membershipExpiresAt?: string
+  onSignOut: () => void
+}) {
   const displayName = preview ? 'Skud Student' : firstName || 'SkuD Turbo member'
   const displayEmail = preview ? 'student@example.com' : userEmail ?? 'Not available'
   const initials = (preview ? 'SS' : firstName || 'ST').slice(0, 2).toUpperCase()
+  const validExpiry = membershipExpiresAt ? new Date(membershipExpiresAt) : null
+  const expiryLabel = validExpiry && Number.isFinite(validExpiry.getTime())
+    ? validExpiry.toLocaleDateString()
+    : null
+  const helpMessage = `Hello, I need help with my SkuD Turbo account.\nName: ${displayName}\nEmail: ${displayEmail}`
 
   return (
     <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-6 px-4 pt-5 sm:px-6">
@@ -371,10 +439,18 @@ function ProfileView({ preview, mentorId, firstName, userEmail, onSignOut }: { p
         <h2 id="membership-status" className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-muted-foreground">Membership access</h2>
         <div className="flex items-start justify-between gap-4 border-y border-border py-4">
           <div>
-            <p className="text-sm font-extrabold">Pending admin approval</p>
-            <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">Your 30-day access period begins after an administrator approves your account.</p>
+            <p className="text-sm font-extrabold">{preview ? 'Preview membership' : 'Access approved'}</p>
+            <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">
+              {preview
+                ? 'This is a sample profile; membership is not connected.'
+                : expiryLabel
+                  ? `Your membership is active until ${expiryLabel}.`
+                  : 'Your membership is active.'}
+            </p>
           </div>
-          <span className="shrink-0 rounded-sm border border-[#e6b94f]/40 px-2 py-1 text-[9px] font-extrabold uppercase tracking-[0.1em] text-[#b28318]">Pending</span>
+          <span className={`shrink-0 rounded-sm border px-2 py-1 text-[9px] font-extrabold uppercase tracking-[0.1em] ${preview ? 'border-white/20 text-white/50' : 'border-[#4bb543]/40 text-[#4bb543]'}`}>
+            {preview ? 'Preview' : 'Approved'}
+          </span>
         </div>
       </section>
 
@@ -386,6 +462,16 @@ function ProfileView({ preview, mentorId, firstName, userEmail, onSignOut }: { p
           <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 py-3"><dt className="text-muted-foreground">Following</dt><dd className="break-all text-right font-semibold">SkudTurbo</dd></div>
         </dl>
       </section>
+
+      <a
+        href={`https://wa.me/26774719272?text=${encodeURIComponent(helpMessage)}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex min-h-11 items-center justify-center gap-2 self-start rounded-sm bg-[#25D366] px-4 text-xs font-extrabold uppercase tracking-[0.1em] text-[#062b17] transition-colors hover:bg-[#20bd5a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      >
+        <LifeBuoy className="size-4" aria-hidden="true" />
+        Request help from IT
+      </a>
 
       <button
         type="button"

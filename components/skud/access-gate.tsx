@@ -56,6 +56,7 @@ function SignedOutElsewhere() {
 export function AccessGate({ preview, login }: { preview: boolean; login?: boolean }) {
   const [access, setAccess] = useState<AccessState | null | undefined>(undefined)
   const [stored, setStored] = useState<StoredMt5Account | null>(null)
+  const [membershipExpiresAt, setMembershipExpiresAt] = useState<string | undefined>()
   const { installed } = usePwaInstall()
 
   useEffect(() => {
@@ -78,11 +79,14 @@ export function AccessGate({ preview, login }: { preview: boolean; login?: boole
           },
           cache: 'no-store',
         })
-        const result = await response.json() as { status?: AccessState; error?: string }
+        const result = await response.json() as { status?: AccessState; expiresAt?: string; error?: string }
         if (!response.ok) throw new Error(result.error ?? 'Could not verify subscription access.')
         if (!active) return
         setAccess(result.status ?? 'error')
-        if (result.status === 'approved') setStored(loadStoredAccount())
+        if (result.status === 'approved') {
+          setMembershipExpiresAt(result.expiresAt)
+          setStored(loadStoredAccount())
+        }
       } catch {
         if (active) setAccess('error')
       }
@@ -111,7 +115,11 @@ export function AccessGate({ preview, login }: { preview: boolean; login?: boole
     )
   }
 
-  if (access === 'approved') return stored ? <Dashboard /> : <GetStarted />
+  if (access === 'approved') {
+    return stored
+      ? <Dashboard membershipExpiresAt={membershipExpiresAt} />
+      : <GetStarted />
+  }
   if (access === 'pending' || access === 'rejected') {
     return <AccessFlow initialAccessStatus={access} />
   }
