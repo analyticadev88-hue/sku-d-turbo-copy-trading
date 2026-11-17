@@ -1,7 +1,7 @@
 """SkuD MT5 command bridge. Uses only the Python standard library.
 
 A single static bridge key (SKUD_BRIDGE_KEY) protects every endpoint; the same
-key is baked into the private PWA build, so clients never authenticate by hand.
+key is baeked into the private PWA build, so clients never authenticate by hand.
 MT5 accounts are registered over HTTPS; the bridge stores credentials in the local
 SQLite database, launches portable MT5 terminals with startup.ini auto-login, and
 queues orders and close requests per account. The SkuD EA inside each terminal polls locally,
