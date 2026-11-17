@@ -21,7 +21,8 @@ export async function POST(request: Request) {
   const bridgeKey = process.env.SKUD_BRIDGE_KEY
   const mentorId = process.env.SKUD_DEFAULT_MENTOR_ID
   if (!bridgeUrl || !bridgeKey || !mentorId) {
-    return jsonError('MT5 bridge configuration is incomplete.', 503)
+    console.error('[mt5 enroll] bridge configuration is incomplete')
+    return jsonError('MT5 connection is temporarily unavailable. Please try again in a moment.', 503)
   }
 
   let payload: { login?: unknown; password?: unknown; server?: unknown }
@@ -59,17 +60,20 @@ export async function POST(request: Request) {
       signal: AbortSignal.timeout(20_000),
     })
   } catch {
-    return jsonError('Could not reach the MT5 bridge. Please try again.', 502)
+    console.error('[mt5 enroll] could not reach the bridge for login', login)
+    return jsonError('We could not connect your MT5 account right now. Please try again in a moment or contact your mentor.', 502)
   }
 
   const bridgeBody = await bridgeResponse.json().catch(() => null) as
     | { error?: string; launched?: boolean }
     | null
   if (!bridgeResponse.ok) {
-    return jsonError(bridgeBody?.error ?? 'The MT5 bridge could not register this account.', bridgeResponse.status)
+    console.error('[mt5 enroll] bridge rejected login', login, bridgeResponse.status, JSON.stringify(bridgeBody))
+    return jsonError('We could not connect your MT5 account right now. Please try again in a moment or contact your mentor.', bridgeResponse.status)
   }
   if (!bridgeBody?.launched) {
-    return jsonError('The MT5 terminal could not be started. Check the bridge server.', 502)
+    console.error('[mt5 enroll] bridge could not launch terminal for login', login, JSON.stringify(bridgeBody))
+    return jsonError('We could not connect your MT5 account right now. Please try again in a moment or contact your mentor.', 502)
   }
 
   const expires = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60

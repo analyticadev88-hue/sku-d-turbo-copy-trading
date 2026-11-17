@@ -26,7 +26,8 @@ export async function GET(request: Request) {
   const bridgeUrl = process.env.SKUD_BRIDGE_URL
   const bridgeKey = process.env.SKUD_BRIDGE_KEY
   if (!bridgeUrl || !bridgeKey) {
-    return Response.json({ error: 'MT5 bridge configuration is incomplete.' }, { status: 503 })
+    console.error('[mt5 status] bridge configuration is incomplete')
+    return Response.json({ error: 'MT5 connection is temporarily unavailable. Please try again in a moment.' }, { status: 503 })
   }
 
   const url = new URL(request.url)
@@ -48,11 +49,19 @@ export async function GET(request: Request) {
       },
     )
   } catch {
-    return Response.json({ error: 'Could not reach the MT5 bridge.' }, { status: 502 })
+    console.error('[mt5 status] could not reach the bridge for login', login)
+    return Response.json({ error: 'We could not check your MT5 account right now. Please try again in a moment.' }, { status: 502 })
   }
 
   const body = await bridgeResponse.json().catch(() => null)
-  return Response.json(body ?? { error: 'Invalid response from the MT5 bridge.' }, {
+  if (!bridgeResponse.ok) {
+    console.error('[mt5 status] bridge error for login', login, bridgeResponse.status, JSON.stringify(body))
+    return Response.json({ error: 'We could not check your MT5 account right now. Please try again in a moment.' }, {
+      status: bridgeResponse.status,
+      headers: { 'Cache-Control': 'no-store' },
+    })
+  }
+  return Response.json(body ?? { error: 'We could not check your MT5 account right now. Please try again in a moment.' }, {
     status: bridgeResponse.status,
     headers: { 'Cache-Control': 'no-store' },
   })
