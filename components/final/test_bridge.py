@@ -766,53 +766,6 @@ class BridgeTests(unittest.TestCase):
             row = db.execute("SELECT volume FROM orders WHERE status='queued'").fetchone()
         self.assertAlmostEqual(row["volume"], 0.05)
 
-    def test_mentor_open_event_scales_proportionally_to_balance(self):
-        self.register_mentor()
-        self.provision(login="987654", server="OtherBroker-Demo", role="mentor")
-        self.provision(login="111111", mentor_id="mentor-skud-01")
-        self.provision(login="222222", mentor_id="mentor-skud-01")
-        # Mentor balance 700; small follower 10; mid follower 70.
-        self.request("/v1/terminal/status", "POST", BRIDGE_KEY,
-                     {"login": "987654", "connected": True, "message": "MT5 login successful",
-                      "server": "DerivSVG-Server-02", "balance": 700, "currency": "USD"})
-        for login, balance in (("111111", 10), ("222222", 70)):
-            self.request("/v1/terminal/status", "POST", "test-ea-token",
-                         {"login": login, "connected": True, "message": "MT5 login successful",
-                          "server": "DerivSVG-Server-02", "balance": balance, "currency": "USD"})
-        status, body = self.mentor_event()
-        self.assertEqual(status, 202)
-        self.assertEqual(json.loads(body)["queued"], 2)
-        with bridge.db_session() as db:
-            rows = db.execute("SELECT login,volume FROM orders WHERE status='queued'").fetchall()
-        volumes = {row["login"]: row["volume"] for row in rows}
-        # 0.1 * (10/700) = 0.0014 -> below the 0.01 fallback minimum, raised so
-        # the small follower still gets the trade (the broker margin-checks it).
-        self.assertAlmostEqual(volumes["111111"], 0.01)
-        # 0.1 * (70/700) = 0.01.
-        self.assertAlmostEqual(volumes["222222"], 0.01)
-
-    def test_mentor_open_event_balance_scaling_respects_multiplier_and_caps(self):
-        self.register_mentor()
-        self.provision(login="987654", server="OtherBroker-Demo", role="mentor")
-        self.provision(login="111111", mentor_id="mentor-skud-01", volume_multiplier=10)
-        self.request("/v1/terminal/status", "POST", BRIDGE_KEY,
-                     {"login": "987654", "connected": True, "message": "MT5 login successful",
-                      "server": "DerivSVG-Server-02", "balance": 1000, "currency": "USD"})
-        self.request("/v1/terminal/status", "POST", "test-ea-token",
-                     {"login": "111111", "connected": True, "message": "MT5 login successful",
-                      "server": "DerivSVG-Server-02", "balance": 500, "currency": "USD"})
-        status, _ = self.request("/v1/prices", "POST", "test-ea-token",
-                                 {"login": "111111", "ticks": [{"symbol": "EURUSD", "bid": 1.1, "ask": 1.2,
-                                                                "volume_min": 0.01, "volume_max": 0.2,
-                                                                "volume_step": 0.01}]})
-        self.assertEqual(status, 200)
-        status, body = self.mentor_event()
-        self.assertEqual(status, 202)
-        with bridge.db_session() as db:
-            row = db.execute("SELECT volume FROM orders WHERE status='queued'").fetchone()
-        # 0.1 * (500/1000) * 10 = 0.5 -> clamped to the reported 0.2 maximum.
-        self.assertAlmostEqual(row["volume"], 0.2)
-
     def test_mentors_list_and_detail_shapes(self):
         self.assertEqual(self.register_mentor()[0], 200)
         self.provision(login="111111", mentor_id="mentor-skud-01")
@@ -1003,6 +956,32 @@ class BridgeTests(unittest.TestCase):
 
         self.assertIn("kept existing slot", note)
         self.assertTrue(keep.exists())
+
+    def test_ensure_terminal_rebuilds_a_missing_slot(self):
+        ensure_patch = next(
+            p for p in self.patches
+            if p.attribute == "ensure_terminal" and p.target is bridge.tm
+        )
+        real_ensure_terminal = ensure_patch.temp_original
+        master = Path(self.temp_dir.name) / "rebuild-master"
+        (master / "MQL5").mkdir(parents=True)
+        (master / "terminal64.exe").write_text("exe", encoding="utf-8")
+        slot = Path(self.temp_dir.name) / "rebuild-slot-missing"
+        with patch.object(bridge.tm, "TERMINAL_MASTER", str(master)), \
+             patch.object(bridge.tm, "running_logins", return_value=set()), \
+             patch.object(bridge.tm, "sync_master_webrequest_settings",
+                          return_value=(str(master / "Config" / "common.ini"), str(slot / "Config" / "common.ini"), {})), \
+             patch.object(bridge.tm, "LAUNCH_STAGGER_SEC", 0), \
+             patch.object(bridge.tm, "EA_SOURCE", ""), \
+             patch.object(bridge.tm, "CHART_TEMPLATE", ""), \
+             patch.object(bridge.tm.subprocess, "Popen") as popen:
+            ok, message = real_ensure_terminal(
+                {"login": "123456", "password": "secret", "server": "Deriv-Demo",
+                 "folder_path": str(slot), "role": "student"})
+
+        self.assertTrue(ok)
+        self.assertTrue((slot / "terminal64.exe").exists())
+        popen.assert_called_once()
 
 
 if __name__ == "__main__":

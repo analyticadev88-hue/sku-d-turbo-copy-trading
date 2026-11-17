@@ -278,19 +278,13 @@ usual and never copies to its own account (fan-out skips the source login).
 
 Every follower account carries a `volume_multiplier` (0.01-100, default 1) and
 a `role` (`student`, default, or `mentor`). When a mentor open event fans out,
-each follower's order volume is scaled **proportionally to balance** —
-
-`event volume x (follower balance / mentor balance) x volume_multiplier`
-
-— using the balances both terminals last reported in their heartbeats
-(`POST /v1/terminal/status`). Until a heartbeat arrives the bridge falls back to
-`event volume x multiplier` alone. The scaled volume is then clamped and
+each follower's order volume is `event volume x multiplier`, then clamped and
 step-rounded using the volume_min/volume_max/volume_step that follower's
 terminal last reported for the symbol (via `POST /v1/prices`); with no report
-the volume is clamped to [0.01, 100]. A proportional volume below the broker
-minimum is raised to the minimum so the follower never misses a trade — the
-broker's margin check remains the final gate. Balances are compared as
-reported, so keep mentor and follower accounts in the same currency.
+the volume is clamped to [0.01, 100]. Keep multipliers conservative for small
+accounts — copying is not balance-proportional, so a follower trading a much
+smaller account than the mentor must use a low multiplier to avoid
+mentor-sized lots.
 
 Additional endpoints (all require the bridge key except where noted):
 

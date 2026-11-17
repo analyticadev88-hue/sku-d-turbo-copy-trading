@@ -249,16 +249,18 @@ def refresh_slot_from_master(folder: Path) -> str:
     master = Path(TERMINAL_MASTER) if TERMINAL_MASTER else None
     if not master or not (master / "terminal64.exe").exists():
         return "kept existing slot (master terminal is not configured)"
+    was_missing = not folder.exists()
     try:
-        for child in list(folder.iterdir()):
-            if child.name == "startup.ini":
-                continue
-            if child.is_symlink() or not child.is_dir():
-                child.unlink(missing_ok=True)
-            else:
-                shutil.rmtree(child, ignore_errors=True)
+        if folder.exists():
+            for child in list(folder.iterdir()):
+                if child.name == "startup.ini":
+                    continue
+                if child.is_symlink() or not child.is_dir():
+                    child.unlink(missing_ok=True)
+                else:
+                    shutil.rmtree(child, ignore_errors=True)
         shutil.copytree(master, folder, ignore=shutil.ignore_patterns("startup.ini"), dirs_exist_ok=True)
-        return "refreshed from master"
+        return "rebuilt from master" if was_missing else "refreshed from master"
     except OSError as exc:
         return f"kept existing slot (refresh failed: {exc.strerror or exc})"
 
@@ -466,7 +468,10 @@ def ensure_terminal(account: dict) -> tuple[bool, str]:
     folder = Path(account["folder_path"])
     exe = folder / "terminal64.exe"
     if not exe.exists():
-        return False, f"terminal64.exe not found in {folder}"
+        note = refresh_slot_from_master(folder)
+        print(f"SkuD MT5 slot {folder.name} for login {login}: {note}")
+        if not exe.exists():
+            return False, f"terminal64.exe not found in {folder} ({note})"
     if login in running_logins():
         return True, "already running; restart the managed terminal to apply master MT5 setting changes"
     refresh_note = refresh_slot_from_master(folder)
