@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import tempfile
 import threading
 import unittest
@@ -82,6 +83,15 @@ class BridgeTests(unittest.TestCase):
             db.execute("DELETE FROM trade_events")
             db.execute("DELETE FROM mentors")
             db.execute("DELETE FROM accounts")
+
+    def test_database_schema_is_initialized_once_per_path(self):
+        path = Path(self.temp_dir.name) / "initialized-once.sqlite3"
+        with patch.object(bridge, "_initialize_db", wraps=bridge._initialize_db) as initialize:
+            first = bridge.connect_db(path)
+            first.close()
+            second = bridge.connect_db(path)
+            second.close()
+        initialize.assert_called_once_with(path)
 
     def provision(self, login="123456", password="secret-pass", server="DerivSVG-Server-02", mentor_id="",
                   volume_multiplier=None, role=None):
@@ -247,6 +257,26 @@ class BridgeTests(unittest.TestCase):
         stop_managed.assert_called_once_with()
         ensure.assert_called_once()
 
+    def test_start_reconciliation_in_background_uses_daemon_worker(self):
+        with patch.object(bridge, "reconcile_on_boot") as reconcile:
+            worker = bridge.start_reconciliation_in_background(force_refresh=True)
+            worker.join(timeout=2)
+
+        self.assertFalse(worker.is_alive())
+        self.assertTrue(worker.daemon)
+        reconcile.assert_called_once_with(force_refresh=True)
+
+    def test_http_access_logs_suppress_success_and_report_errors(self):
+        handler = object.__new__(bridge.BridgeHandler)
+        handler.client_address = ("127.0.0.1", 12345)
+        with patch.dict(bridge.os.environ, {"SKUD_HTTP_ACCESS_LOG": "0"}):
+            with self.assertLogs("skud.bridge", level="WARNING") as captured:
+                handler.log_message('"%s" %s %s', "GET /v1/commands/next HTTP/1.1", "204", "-")
+                handler.log_message('"%s" %s %s', "GET /v1/status HTTP/1.1", "401", "-")
+
+        self.assertEqual(len(captured.records), 1)
+        self.assertIn("401", captured.output[0])
+
     def test_chart_token_sync_rewrites_utf16_and_utf8_bom_profiles(self):
         token = "replacement-bridge-token"
         with patch.dict(bridge.os.environ, {"SKUD_EA_TOKEN": token}):
@@ -289,6 +319,156 @@ class BridgeTests(unittest.TestCase):
         payload = json.loads(body)
         self.assertEqual(payload["balance"], 5423.75)
         self.assertEqual(payload["currency"], "USD")
+        self.assertIsNotNone(payload["balance_updated_at"])
+        self.assertEqual(payload["state"], "mode_unknown")
+        self.assertIsNone(payload["copying_ready"])
+        self.assertIn("does not report account mode", payload["message"])
+
+    def test_account_list_exposes_client_monitoring_status_without_unconfirmed_balance(self):
+        self.provision()
+        status, body = self.request("/v1/accounts", token=BRIDGE_KEY)
+        self.assertEqual(status, 200)
+        account = json.loads(body)["accounts"][0]
+        self.assertEqual(account["state"], "starting")
+        self.assertIsNone(account["balance"])
+
+        self.request("/v1/terminal/status", "POST", "test-ea-token", {
+            "login": "123456", "connected": True, "server": "DerivSVG-Server-02",
+            "balance": 5423.75, "currency": "USD",
+        })
+        status, body = self.request("/v1/accounts", token=BRIDGE_KEY)
+        self.assertEqual(status, 200)
+        account = json.loads(body)["accounts"][0]
+        self.assertEqual(account["state"], "mode_unknown")
+        self.assertTrue(account["ea_connected"])
+        self.assertEqual(account["balance"], 5423.75)
+        self.assertIsNotNone(account["balance_updated_at"])
+
+    def test_disconnected_heartbeat_preserves_last_confirmed_balance(self):
+        self.provision()
+        self.request("/v1/terminal/status", "POST", "test-ea-token", {
+            "login": "123456", "connected": True, "trading_allowed": True,
+            "server": "DerivSVG-Server-02", "margin_mode": "hedging",
+            "balance": 5423.75, "currency": "USD",
+        })
+        self.request("/v1/terminal/status", "POST", "test-ea-token", {
+            "login": "123456", "connected": False, "trading_allowed": False,
+            "server": "DerivSVG-Server-02", "balance": 0, "currency": "",
+        })
+        status, body = self.request("/v1/status?login=123456", token=BRIDGE_KEY)
+        payload = json.loads(body)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["state"], "disconnected")
+        self.assertEqual(payload["balance"], 5423.75)
+        self.assertEqual(payload["currency"], "USD")
+        self.assertIsNotNone(payload["balance_updated_at"])
+
+    def test_netting_account_is_connected_but_not_copy_ready(self):
+        self.provision()
+        status, _ = self.request("/v1/terminal/status", "POST", "test-ea-token", {
+            "login": "123456", "connected": True, "trading_allowed": True,
+            "server": "DerivSVG-Server-02", "margin_mode": "netting",
+            "balance": 1000, "currency": "USD",
+        })
+        self.assertEqual(status, 200)
+        status, body = self.request("/v1/status?login=123456", token=BRIDGE_KEY)
+        payload = json.loads(body)
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["terminal_connected"])
+        self.assertFalse(payload["copying_ready"])
+        self.assertEqual(payload["state"], "mode_unsupported")
+        self.assertIn("hedging account", payload["message"])
+
+    def test_known_netting_followers_are_skipped_when_copy_event_is_queued(self):
+        self.provision(mentor_id="mentor-skud-01")
+        self.request("/v1/terminal/status", "POST", "test-ea-token", {
+            "login": "123456", "connected": True, "trading_allowed": True,
+            "server": "DerivSVG-Server-02", "margin_mode": "netting",
+        })
+        status, body = self.mentor_event()
+        payload = json.loads(body)
+        self.assertEqual(status, 202)
+        self.assertEqual(payload["queued"], 0)
+        self.assertEqual(payload["skipped_unsupported_mode"], 1)
+
+    def test_queued_copy_order_is_failed_if_account_reports_netting(self):
+        self.provision(mentor_id="mentor-skud-01")
+        status, body = self.mentor_event()
+        self.assertEqual(status, 202)
+        self.assertEqual(json.loads(body)["queued"], 1)
+        with bridge.db_session() as db:
+            order_id = db.execute(
+                "SELECT id FROM orders WHERE login='123456' AND mentor_id='mentor-skud-01'"
+            ).fetchone()["id"]
+        self.request("/v1/terminal/status", "POST", "test-ea-token", {
+            "login": "123456", "connected": True, "trading_allowed": True,
+            "server": "DerivSVG-Server-02", "margin_mode": "netting",
+        })
+        status, _ = self.request("/v1/commands/next?login=123456", token="test-ea-token")
+        self.assertEqual(status, 204)
+        status, body = self.request(f"/v1/orders/{order_id}", token=BRIDGE_KEY)
+        order = json.loads(body)
+        self.assertEqual(status, 200)
+        self.assertEqual(order["status"], "failed")
+        self.assertIn("hedging account", order["result_message"])
+
+    def test_legacy_terminal_status_schema_is_migrated(self):
+        path = Path(self.temp_dir.name) / "legacy.sqlite3"
+        db = sqlite3.connect(path)
+        try:
+            db.execute(
+                "CREATE TABLE terminal_status(login TEXT PRIMARY KEY,connected INTEGER NOT NULL,"
+                "last_seen REAL NOT NULL,message TEXT NOT NULL DEFAULT '')"
+            )
+            db.execute(
+                "INSERT INTO terminal_status(login,connected,last_seen,message) "
+                "VALUES('123456',1,10,'legacy heartbeat')"
+            )
+            db.commit()
+        finally:
+            db.close()
+        db = bridge.connect_db(path)
+        try:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(terminal_status)")}
+            row = db.execute(
+                "SELECT trading_allowed,ever_connected,margin_mode FROM terminal_status WHERE login='123456'"
+            ).fetchone()
+        finally:
+            db.close()
+        self.assertTrue({
+            "trading_allowed", "ever_connected", "server", "balance", "balance_updated_at",
+            "currency", "margin_mode",
+        } <= columns)
+        self.assertEqual(row["trading_allowed"], 0)
+        self.assertEqual(row["ever_connected"], 1)
+        self.assertEqual(row["margin_mode"], "")
+
+    def test_unconfirmed_login_has_actionable_status(self):
+        self.provision()
+        status, _ = self.request("/v1/terminal/status", "POST", "test-ea-token", {
+            "login": "123456", "connected": False, "trading_allowed": False,
+            "server": "DerivSVG-Server-02",
+            "message": "MT5 has not confirmed the broker login. Check the login, trading password, and server.",
+        })
+        self.assertEqual(status, 200)
+        status, body = self.request("/v1/status?login=123456", token=BRIDGE_KEY)
+        payload = json.loads(body)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["state"], "login_unverified")
+        self.assertIn("trading password", payload["message"])
+
+    def test_connected_hedging_account_with_trading_disabled_is_not_copy_ready(self):
+        self.provision()
+        self.request("/v1/terminal/status", "POST", "test-ea-token", {
+            "login": "123456", "connected": True, "trading_allowed": False,
+            "server": "DerivSVG-Server-02", "margin_mode": "hedging",
+        })
+        status, body = self.request("/v1/status?login=123456", token=BRIDGE_KEY)
+        payload = json.loads(body)
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["terminal_connected"])
+        self.assertEqual(payload["state"], "trading_disabled")
+        self.assertFalse(payload["copying_ready"])
 
     def test_provision_registers_account_and_hides_password(self):
         self.fake_running.add("123456")
@@ -981,6 +1161,87 @@ class BridgeTests(unittest.TestCase):
 
         self.assertTrue(ok)
         self.assertTrue((slot / "terminal64.exe").exists())
+        popen.assert_called_once()
+
+    def test_ensure_terminal_skips_refresh_for_fresh_slots(self):
+        ensure_patch = next(
+            p for p in self.patches
+            if p.attribute == "ensure_terminal" and p.target is bridge.tm
+        )
+        real_ensure_terminal = ensure_patch.temp_original
+        assign_patch = next(
+            p for p in self.patches
+            if p.attribute == "assign_slot" and p.target is bridge.tm
+        )
+        real_assign_slot = assign_patch.temp_original
+        master = Path(self.temp_dir.name) / "fresh-master"
+        (master / "MQL5").mkdir(parents=True)
+        (master / "terminal64.exe").write_text("exe", encoding="utf-8")
+        terminals_dir = Path(self.temp_dir.name) / "fresh-terminals"
+        with patch.object(bridge.tm, "TERMINAL_MASTER", str(master)), \
+             patch.object(bridge.tm, "TERMINALS_DIR", terminals_dir):
+            slot = real_assign_slot(set())
+
+        with patch.object(bridge.tm, "TERMINAL_MASTER", str(master)), \
+             patch.object(bridge.tm, "running_logins", return_value=set()), \
+             patch.object(bridge.tm, "sync_master_webrequest_settings",
+                          return_value=(str(master / "Config" / "common.ini"), str(slot / "Config" / "common.ini"), {})), \
+             patch.object(bridge.tm, "LAUNCH_STAGGER_SEC", 0), \
+             patch.object(bridge.tm, "EA_SOURCE", ""), \
+             patch.object(bridge.tm, "CHART_TEMPLATE", ""), \
+             patch.object(bridge.tm, "refresh_slot_from_master") as refresh, \
+             patch.object(bridge.tm.subprocess, "Popen") as popen:
+            ok, _message = real_ensure_terminal(
+                {"login": "123456", "password": "secret", "server": "Deriv-Demo",
+                 "folder_path": str(slot), "role": "student"})
+
+        self.assertTrue(ok)
+        refresh.assert_not_called()
+        popen.assert_called_once()
+
+    def test_ensure_terminal_does_not_duplicate_concurrent_launches(self):
+        ensure_patch = next(
+            p for p in self.patches
+            if p.attribute == "ensure_terminal" and p.target is bridge.tm
+        )
+        real_ensure_terminal = ensure_patch.temp_original
+        slot = Path(self.temp_dir.name) / "concurrent-slot"
+        slot.mkdir()
+        (slot / "terminal64.exe").write_text("exe", encoding="utf-8")
+        account = {
+            "login": "123456",
+            "password": "secret",
+            "server": "Deriv-Demo",
+            "folder_path": str(slot),
+            "role": "student",
+        }
+        launch_started = threading.Event()
+        finish_launch = threading.Event()
+        results = []
+
+        def block_launch(*_args, **_kwargs):
+            launch_started.set()
+            if not finish_launch.wait(timeout=5):
+                raise TimeoutError("test launch was not released")
+
+        with patch.object(bridge.tm, "running_logins", return_value=set()), \
+             patch.object(bridge.tm, "refresh_slot_from_master", return_value="unchanged"), \
+             patch.object(bridge.tm, "sync_master_webrequest_settings", return_value=("source", "target", [])), \
+             patch.object(bridge.tm, "LAUNCH_STAGGER_SEC", 0), \
+             patch.object(bridge.tm, "EA_SOURCE", ""), \
+             patch.object(bridge.tm, "CHART_TEMPLATE", ""), \
+             patch.object(bridge.tm.subprocess, "Popen", side_effect=block_launch) as popen:
+            first = threading.Thread(target=lambda: results.append(real_ensure_terminal(account)))
+            first.start()
+            self.assertTrue(launch_started.wait(timeout=5))
+            second_result = real_ensure_terminal(account)
+            finish_launch.set()
+            first.join(timeout=5)
+
+        self.assertFalse(first.is_alive())
+        self.assertEqual(len(results), 1)
+        self.assertTrue(results[0][0])
+        self.assertEqual(second_result, (True, "terminal launch already in progress"))
         popen.assert_called_once()
 
 

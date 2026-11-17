@@ -13,6 +13,7 @@ from __future__ import annotations
 import hmac
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -30,6 +31,7 @@ import terminal_manager as tm
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("SKUD_DB_PATH", ROOT / "data" / "skud.sqlite3"))
+LOG = logging.getLogger("skud.bridge")
 BRIDGE_KEY = os.environ.get("SKUD_BRIDGE_KEY", "")
 EA_TOKEN = os.environ.get("SKUD_EA_TOKEN", "")
 ALLOWED_ORIGIN = os.environ.get("SKUD_ALLOWED_ORIGIN", "http://localhost:3000")
@@ -43,9 +45,11 @@ LOGIN_RE = re.compile(r"^\d{4,20}$")
 MENTOR_ID_RE = re.compile(r"^[A-Za-z0-9_-]{3,64}$")
 HEARTBEAT_STALE_SEC = 30
 CLOSE_STATUSES = {"closed", "failed"}
+_DB_INIT_LOCK = threading.Lock()
+_INITIALIZED_DB_PATHS: set[str] = set()
 
 
-def connect_db(path: Path | None = None) -> sqlite3.Connection:
+def _initialize_db(path: Path) -> sqlite3.Connection:
     path = path or DB_PATH
     connection = sqlite3.connect(path, timeout=10)
     connection.row_factory = sqlite3.Row
@@ -94,20 +98,33 @@ def connect_db(path: Path | None = None) -> sqlite3.Connection:
         """CREATE TABLE IF NOT EXISTS terminal_status (
             login TEXT PRIMARY KEY,
             connected INTEGER NOT NULL,
+            trading_allowed INTEGER NOT NULL DEFAULT 0,
+            ever_connected INTEGER NOT NULL DEFAULT 0,
             last_seen REAL NOT NULL,
             message TEXT NOT NULL DEFAULT '',
             server TEXT NOT NULL DEFAULT '',
             balance REAL NOT NULL DEFAULT 0,
-            currency TEXT NOT NULL DEFAULT ''
+            balance_updated_at REAL,
+            currency TEXT NOT NULL DEFAULT '',
+            margin_mode TEXT NOT NULL DEFAULT ''
         )"""
     )
     status_columns = {row[1] for row in connection.execute("PRAGMA table_info(terminal_status)")}
+    if "trading_allowed" not in status_columns:
+        connection.execute("ALTER TABLE terminal_status ADD COLUMN trading_allowed INTEGER NOT NULL DEFAULT 0")
+    if "ever_connected" not in status_columns:
+        connection.execute("ALTER TABLE terminal_status ADD COLUMN ever_connected INTEGER NOT NULL DEFAULT 0")
+        connection.execute("UPDATE terminal_status SET ever_connected=connected")
     if "server" not in status_columns:
         connection.execute("ALTER TABLE terminal_status ADD COLUMN server TEXT NOT NULL DEFAULT ''")
     if "balance" not in status_columns:
         connection.execute("ALTER TABLE terminal_status ADD COLUMN balance REAL NOT NULL DEFAULT 0")
+    if "balance_updated_at" not in status_columns:
+        connection.execute("ALTER TABLE terminal_status ADD COLUMN balance_updated_at REAL")
     if "currency" not in status_columns:
         connection.execute("ALTER TABLE terminal_status ADD COLUMN currency TEXT NOT NULL DEFAULT ''")
+    if "margin_mode" not in status_columns:
+        connection.execute("ALTER TABLE terminal_status ADD COLUMN margin_mode TEXT NOT NULL DEFAULT ''")
     connection.execute(
         """CREATE TABLE IF NOT EXISTS prices (
             login TEXT NOT NULL,
@@ -239,6 +256,20 @@ def connect_db(path: Path | None = None) -> sqlite3.Connection:
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_copied_positions_mentor_source ON copied_positions(mentor_id,source_position_id)"
     )
+    return connection
+
+
+def connect_db(path: Path | None = None) -> sqlite3.Connection:
+    db_path = Path(path or DB_PATH)
+    cache_key = str(db_path.resolve()).casefold()
+    if cache_key not in _INITIALIZED_DB_PATHS:
+        with _DB_INIT_LOCK:
+            if cache_key not in _INITIALIZED_DB_PATHS:
+                connection = _initialize_db(db_path)
+                _INITIALIZED_DB_PATHS.add(cache_key)
+                return connection
+    connection = sqlite3.connect(db_path, timeout=10)
+    connection.row_factory = sqlite3.Row
     return connection
 
 
@@ -535,25 +566,56 @@ def scale_follower_volume(db: sqlite3.Connection, follower: sqlite3.Row, symbol:
 def reconcile_on_boot(force_refresh: bool = False) -> None:
     """Launch active accounts, optionally closing and refreshing managed terminals first."""
     if force_refresh:
-        print("[reconcile] closing managed MT5 terminals before refreshing EA/profile files")
+        LOG.warning("Closing managed MT5 terminals before refreshing EA/profile files")
         tm.stop_managed_terminals()
     running = tm.running_logins(ttl=0)
     with db_session() as db:
         rows = db.execute("SELECT * FROM accounts WHERE is_active=1").fetchall()
+    already_running = 0
+    launched = 0
+    failed = 0
     for row in rows:
         if row["login"] in running:
-            print(f"[reconcile] {row['login']} already running")
+            already_running += 1
             continue
         ok, message = tm.ensure_terminal(dict(row))
-        state = "OK" if ok else "FAILED"
-        print(f"[reconcile] {row['login']} -> {state}: {message}")
+        if ok:
+            launched += 1
+        else:
+            failed += 1
+            LOG.error("Terminal recovery failed for login %s: %s", row["login"], message)
+    LOG.info(
+        "Terminal recovery complete: %d active, %d already running, %d launched, %d failed",
+        len(rows),
+        already_running,
+        launched,
+        failed,
+    )
+
+
+def start_reconciliation_in_background(force_refresh: bool = False) -> threading.Thread:
+    """Reconcile accounts without delaying the bridge from accepting requests."""
+    worker = threading.Thread(
+        target=reconcile_on_boot,
+        kwargs={"force_refresh": force_refresh},
+        name="skud-terminal-reconciliation",
+        daemon=True,
+    )
+    worker.start()
+    return worker
 
 
 class BridgeHandler(BaseHTTPRequestHandler):
     server_version = "SkuDBridge/2.2"
 
     def log_message(self, fmt: str, *args: object) -> None:
-        print(f"[{self.log_date_time_string()}] {fmt % args}")
+        message = fmt % args
+        if os.environ.get("SKUD_HTTP_ACCESS_LOG", "").strip().lower() in {"1", "true", "yes"}:
+            LOG.info("%s - %s", self.client_address[0], message)
+            return
+        status_match = re.search(r'"\s(\d{3})\s', message) or re.match(r"code\s+(\d{3})", message)
+        if status_match and int(status_match.group(1)) >= 400:
+            LOG.warning("%s - %s", self.client_address[0], message)
 
     def _send(self, status: int, payload: object = None, content_type: str = "application/json") -> None:
         if payload is None:
@@ -673,25 +735,70 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     if not account:
                         return self._send(404, {"error": "Unknown MT5 student account."})
                     row = db.execute(
-                        "SELECT connected,last_seen,message,server,balance,currency FROM terminal_status WHERE login=?", (login,)
+                        "SELECT connected,trading_allowed,ever_connected,last_seen,message,server,balance,"
+                        "balance_updated_at,currency,margin_mode "
+                        "FROM terminal_status WHERE login=?", (login,)
                     ).fetchone()
                     server_matches = bool(row and row["server"] == account["server"])
-                    connected = bool(row and row["connected"] and server_matches and
-                                     now - row["last_seen"] < HEARTBEAT_STALE_SEC)
+                    heartbeat_fresh = bool(row and now - row["last_seen"] < HEARTBEAT_STALE_SEC)
+                    connected = bool(row and row["connected"] and server_matches and heartbeat_fresh)
+                    margin_mode = row["margin_mode"] if row else ""
+                    mode_known = margin_mode in {"hedging", "netting", "exchange"}
+                    trading_allowed = (
+                        bool(row["trading_allowed"])
+                        if row and mode_known
+                        else connected if row else False
+                    )
+                    copying_ready = (
+                        connected and trading_allowed and margin_mode == "hedging"
+                        if mode_known else None
+                    )
                     if row and row["connected"] and not server_matches:
+                        state = "server_mismatch"
                         message = f"MT5 reports server {row['server'] or 'unknown'}; expected {account['server']}."
+                    elif connected and not mode_known:
+                        state = "mode_unknown"
+                        message = "MT5 is connected, but this terminal does not report account mode, so copy-trading compatibility cannot be verified."
+                    elif connected and margin_mode != "hedging":
+                        state = "mode_unsupported"
+                        message = f"MT5 is connected, but this account uses {margin_mode} mode. SkuD copy trading currently requires a hedging account."
+                    elif connected and not trading_allowed:
+                        state = "trading_disabled"
+                        message = row["message"] or "MT5 is connected, but trading is not allowed for this account."
+                    elif connected:
+                        state = "connected"
+                        message = row["message"] or f"MT5 login confirmed on {row['server']}."
+                    elif row and row["ever_connected"]:
+                        state = "disconnected"
+                        message = "MT5 was connected before but is now disconnected. Check the terminal's broker connection."
+                    elif row and heartbeat_fresh:
+                        state = "login_unverified"
+                        message = "MT5 has not confirmed this broker login. Check the MT5 login, trading password, and exact server name."
+                    elif row:
+                        state = "login_unverified"
+                        message = "No recent MT5 login confirmation. Check the MT5 login, trading password, and exact server name."
                     else:
-                        message = row["message"] if row and row["message"] else \
-                                  f"MT5 login not confirmed for {login}. Check the login, trading password, and server."
+                        state = "starting"
+                        message = "Waiting for MT5 to confirm the broker login. If this continues, verify the login, trading password, and server."
                     return self._send(200, {
                         "login": login,
                         "terminal_connected": connected,
-                        "state": "connected" if connected else "not_confirmed",
+                        "trading_allowed": trading_allowed,
+                        "copying_ready": copying_ready,
+                        "margin_mode": margin_mode,
+                        "state": state,
                         "expected_server": account["server"],
                         "reported_server": row["server"] if row else "",
                         "last_seen": row["last_seen"] if row else None,
+                        "balance_updated_at": row["balance_updated_at"] if row else None,
                         "message": message,
-                        "balance": float(row["balance"]) if row else 0.0,
+                        "balance": (
+                            float(row["balance"])
+                            if row and (
+                                row["balance_updated_at"] is not None or row["currency"]
+                            )
+                            else None
+                        ),
                         "currency": row["currency"] if row else "",
                     })
                 count = db.execute("SELECT COUNT(*) AS c FROM accounts WHERE is_active=1").fetchone()["c"]
@@ -702,12 +809,78 @@ class BridgeHandler(BaseHTTPRequestHandler):
             running = tm.running_logins()
             now = time.time()
             with db_session() as db:
-                rows = db.execute("SELECT * FROM accounts ORDER BY created_at").fetchall()
+                rows = db.execute(
+                    "SELECT a.*,ts.connected AS heartbeat_connected,"
+                    "ts.trading_allowed AS heartbeat_trading_allowed,"
+                    "ts.ever_connected AS heartbeat_ever_connected,"
+                    "ts.last_seen AS heartbeat_last_seen,ts.message AS heartbeat_message,"
+                    "ts.server AS heartbeat_server,ts.balance AS heartbeat_balance,"
+                    "ts.balance_updated_at AS heartbeat_balance_updated_at,"
+                    "ts.currency AS heartbeat_currency,ts.margin_mode AS heartbeat_margin_mode "
+                    "FROM accounts a LEFT JOIN terminal_status ts ON ts.login=a.login "
+                    "ORDER BY a.created_at"
+                ).fetchall()
                 accounts = []
                 for row in rows:
-                    heartbeat = db.execute(
-                        "SELECT connected,last_seen,message FROM terminal_status WHERE login=?", (row["login"],)
-                    ).fetchone()
+                    heartbeat_fresh = (
+                        row["heartbeat_last_seen"] is not None
+                        and now - row["heartbeat_last_seen"] < HEARTBEAT_STALE_SEC
+                    )
+                    has_heartbeat = row["heartbeat_last_seen"] is not None
+                    reported_server = row["heartbeat_server"] or ""
+                    margin_mode = row["heartbeat_margin_mode"] or ""
+                    mode_known = margin_mode in {"hedging", "netting", "exchange"}
+                    connected = bool(
+                        row["heartbeat_connected"]
+                        and heartbeat_fresh
+                        and reported_server == row["server"]
+                    )
+                    if not row["is_active"]:
+                        state = "inactive"
+                        message = "This MT5 account is inactive."
+                    elif has_heartbeat and heartbeat_fresh and reported_server != row["server"]:
+                        state = "server_mismatch"
+                        message = (
+                            f"MT5 reports server {reported_server or 'unknown'}; "
+                            f"expected {row['server']}."
+                        )
+                    elif connected and not mode_known:
+                        state = "mode_unknown"
+                        message = (
+                            "MT5 is connected, but account mode is not reported, "
+                            "so copy-trading compatibility cannot be verified."
+                        )
+                    elif connected and margin_mode != "hedging":
+                        state = "mode_unsupported"
+                        message = f"This account uses {margin_mode} mode; copy trading requires hedging mode."
+                    elif connected and not row["heartbeat_trading_allowed"]:
+                        state = "trading_disabled"
+                        message = "MT5 is connected, but trading is not allowed for this account."
+                    elif connected:
+                        state = "connected"
+                        message = row["heartbeat_message"] or "MT5 login confirmed."
+                    elif row["heartbeat_ever_connected"]:
+                        state = "disconnected"
+                        message = "MT5 was connected before but has no recent broker connection."
+                    elif has_heartbeat:
+                        state = "login_unverified"
+                        message = (
+                            row["heartbeat_message"]
+                            if heartbeat_fresh and row["heartbeat_message"]
+                            else "MT5 has not confirmed this broker login. Check the login, password, and server."
+                        )
+                    else:
+                        state = "starting"
+                        message = "Waiting for MT5 to confirm the broker login."
+                    trading_allowed = (
+                        bool(row["heartbeat_trading_allowed"])
+                        if mode_known and has_heartbeat
+                        else None
+                    )
+                    copying_ready = (
+                        connected and trading_allowed and margin_mode == "hedging"
+                        if mode_known else None
+                    )
                     accounts.append({
                         "login": row["login"],
                         "server": row["server"],
@@ -717,11 +890,22 @@ class BridgeHandler(BaseHTTPRequestHandler):
                         "volume_multiplier": row["volume_multiplier"],
                         "role": row["role"],
                         "terminal_running": row["login"] in running,
-                        "ea_connected": bool(
-                            heartbeat and heartbeat["connected"] and now - heartbeat["last_seen"] < HEARTBEAT_STALE_SEC
+                        "ea_connected": connected,
+                        "state": state,
+                        "trading_allowed": trading_allowed,
+                        "copying_ready": copying_ready,
+                        "margin_mode": margin_mode,
+                        "reported_server": reported_server,
+                        "last_seen": row["heartbeat_last_seen"],
+                        "balance": (
+                            float(row["heartbeat_balance"])
+                            if row["heartbeat_balance_updated_at"] is not None
+                            or row["heartbeat_currency"]
+                            else None
                         ),
-                        "last_seen": heartbeat["last_seen"] if heartbeat else None,
-                        "message": heartbeat["message"] if heartbeat else "Waiting for the SkuD EA heartbeat.",
+                        "balance_updated_at": row["heartbeat_balance_updated_at"],
+                        "currency": row["heartbeat_currency"] or "",
+                        "message": message,
                     })
             return self._send(200, {"accounts": accounts})
         if parsed.path == "/v1/mentors":
@@ -729,17 +913,16 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 return self._send(401, {"error": "Unauthorized"})
             with db_session() as db:
                 rows = db.execute(
-                    "SELECT mentor_id,mentor_name,login,server,is_active,created_at,updated_at "
-                    "FROM mentors ORDER BY created_at"
+                    "SELECT m.mentor_id,m.mentor_name,m.login,m.server,m.is_active,m.created_at,m.updated_at,"
+                    "COUNT(a.login) AS active_followers "
+                    "FROM mentors m LEFT JOIN accounts a "
+                    "ON a.mentor_id=m.mentor_id AND a.is_active=1 "
+                    "GROUP BY m.mentor_id ORDER BY m.created_at"
                 ).fetchall()
-                mentors = []
-                for row in rows:
-                    followers = db.execute(
-                        "SELECT COUNT(*) AS c FROM accounts WHERE mentor_id=? AND is_active=1",
-                        (row["mentor_id"],),
-                    ).fetchone()["c"]
-                    mentors.append({**dict(row), "is_active": bool(row["is_active"]),
-                                    "active_followers": followers})
+                mentors = [
+                    {**dict(row), "is_active": bool(row["is_active"])}
+                    for row in rows
+                ]
             return self._send(200, {"mentors": mentors})
         match = re.fullmatch(r"/v1/mentors/([A-Za-z0-9_-]{3,64})", parsed.path)
         if match:
@@ -835,12 +1018,26 @@ class BridgeHandler(BaseHTTPRequestHandler):
             login = parse_qs(parsed.query).get("login", [""])[0].strip()
             now = time.time()
             with db_session() as db:
-                account = db.execute("SELECT is_active FROM accounts WHERE login=?", (login,)).fetchone()
+                account = db.execute(
+                    "SELECT a.is_active,ts.margin_mode FROM accounts a "
+                    "LEFT JOIN terminal_status ts ON ts.login=a.login WHERE a.login=?",
+                    (login,),
+                ).fetchone()
                 if not account:
                     return self._send(403, {"error": "EA login is not a registered SkuD account."})
                 if not account["is_active"]:
                     return self._send(403, {"error": "MT5 account is deactivated."})
                 db.execute("BEGIN IMMEDIATE")
+                if account and account["margin_mode"] in {"netting", "exchange"}:
+                    message = (
+                        f"Copy trading requires a hedging account; this account uses "
+                        f"{account['margin_mode']} mode."
+                    )
+                    db.execute(
+                        "UPDATE orders SET status='failed',result_message=?,updated_at=? "
+                        "WHERE login=? AND status='queued' AND mentor_id!=''",
+                        (message, now, login),
+                    )
                 row = db.execute(
                     "SELECT * FROM orders WHERE status='queued' AND login=? ORDER BY created_at LIMIT 1", (login,)
                 ).fetchone()
@@ -984,12 +1181,18 @@ class BridgeHandler(BaseHTTPRequestHandler):
                      event["login"], event["symbol"], event["side"], event["volume"], now),
                 )
                 queued = 0
+                skipped_unsupported_mode = 0
                 if event["event_type"] == "open":
                     followers = db.execute(
-                        "SELECT login,volume_multiplier FROM accounts WHERE mentor_id=? AND is_active=1 AND login!=?",
+                        "SELECT a.login,a.volume_multiplier,ts.margin_mode FROM accounts a "
+                        "LEFT JOIN terminal_status ts ON ts.login=a.login "
+                        "WHERE a.mentor_id=? AND a.is_active=1 AND a.login!=?",
                         (event["mentor_id"], event["login"]),
                     ).fetchall()
                     for follower in followers:
+                        if follower["margin_mode"] in {"netting", "exchange"}:
+                            skipped_unsupported_mode += 1
+                            continue
                         volume = scale_follower_volume(db, follower, event["symbol"], event["volume"])
                         db.execute(
                             "INSERT INTO orders(id,login,symbol,order_type,volume,entry_price,tp_enabled,tp_distance,"
@@ -1020,7 +1223,12 @@ class BridgeHandler(BaseHTTPRequestHandler):
                         "DELETE FROM copied_positions WHERE mentor_id=? AND source_position_id=?",
                         (event["mentor_id"], event["position_id"]),
                     )
-            return self._send(202, {"event_id": event["event_id"], "duplicate": False, "queued": queued})
+            return self._send(202, {
+                "event_id": event["event_id"],
+                "duplicate": False,
+                "queued": queued,
+                "skipped_unsupported_mode": skipped_unsupported_mode if event["event_type"] == "open" else 0,
+            })
         if parsed.path == "/v1/accounts":
             if not client_authed(self.headers.get("Authorization", "")):
                 return self._send(401, {"error": "Unauthorized"})
@@ -1397,11 +1605,18 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 connected = bool(status.get("connected"))
                 message = str(status.get("message", ""))[:200]
                 server = str(status.get("server", ""))[:128]
+                margin_mode = str(status.get("margin_mode", "")).strip().lower()
+                trading_allowed = bool(status.get("trading_allowed", False))
                 try:
                     balance = float(status.get("balance", 0))
                 except (TypeError, ValueError):
                     return self._send(400, {"error": "balance must be a number."})
                 currency = str(status.get("currency", ""))[:16]
+                if margin_mode not in {"", "unknown", "hedging", "netting", "exchange"}:
+                    return self._send(400, {"error": "margin_mode must be hedging, netting, exchange, or unknown."})
+                if not math.isfinite(balance):
+                    return self._send(400, {"error": "balance must be finite."})
+                heartbeat_at = time.time()
             except (json.JSONDecodeError, ValueError, AttributeError) as error:
                 return self._send(400, {"error": str(error)})
             with db_session() as db:
@@ -1409,26 +1624,40 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 if not known:
                     return self._send(403, {"error": "Heartbeat login is not a registered SkuD account."})
                 db.execute(
-                    "INSERT INTO terminal_status(login,connected,last_seen,message,server,balance,currency) VALUES(?,?,?,?,?,?,?) "
+                    "INSERT INTO terminal_status(login,connected,trading_allowed,ever_connected,last_seen,message,server,balance,currency,margin_mode,balance_updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?) "
                     "ON CONFLICT(login) DO UPDATE SET connected=excluded.connected,last_seen=excluded.last_seen,"
-                    "message=excluded.message,server=excluded.server,balance=excluded.balance,currency=excluded.currency",
-                    (login, int(connected), time.time(), message, server, balance, currency),
+                    "trading_allowed=excluded.trading_allowed,ever_connected=MAX(terminal_status.ever_connected,excluded.connected),"
+                    "message=excluded.message,server=excluded.server,"
+                    "balance=CASE WHEN excluded.connected=1 THEN excluded.balance ELSE terminal_status.balance END,"
+                    "balance_updated_at=CASE WHEN excluded.connected=1 THEN excluded.balance_updated_at "
+                    "ELSE terminal_status.balance_updated_at END,"
+                    "currency=CASE WHEN excluded.connected=1 THEN excluded.currency ELSE terminal_status.currency END,"
+                    "margin_mode=CASE WHEN excluded.margin_mode IN ('hedging','netting','exchange') "
+                    "THEN excluded.margin_mode ELSE terminal_status.margin_mode END",
+                    (login, int(connected), int(trading_allowed), int(connected), heartbeat_at,
+                     message, server, balance, currency, margin_mode, heartbeat_at),
                 )
             return self._send(200, {"status": "recorded"})
         return self._send(404, {"error": "Not found"})
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=os.environ.get("SKUD_LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     if len(BRIDGE_KEY) < 32:
         raise SystemExit("Set SKUD_BRIDGE_KEY (32+ characters) before starting.")
     with db_session():
         pass
-    if os.environ.get("SKUD_RECONCILE_ON_BOOT", "1") == "1":
-        reconcile_on_boot()
     host = os.environ.get("SKUD_HOST", "127.0.0.1")
     port = int(os.environ.get("SKUD_PORT", "8765"))
     server = ThreadingHTTPServer((host, port), BridgeHandler)
-    print("SkuD bridge listening at http://%s:%d" % (host, port))
+    LOG.info("SkuD bridge listening at http://%s:%d", host, port)
+    if os.environ.get("SKUD_RECONCILE_ON_BOOT", "1") == "1":
+        force_refresh = os.environ.get("SKUD_REFRESH_TERMINALS_ON_BOOT", "0") == "1"
+        start_reconciliation_in_background(force_refresh=force_refresh)
     server.serve_forever()
 
 

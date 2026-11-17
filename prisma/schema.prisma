@@ -39,9 +39,22 @@ model User {
   updatedAt       DateTime       @updatedAt
   subscriptions Subscription[]
   payments      PaymentOrder[]
+  mt5Accounts   Mt5Account[]
 
   @@index([accessStatus, createdAt])
   @@index([mentorId])
+}
+
+model Mt5Account {
+  login              String   @id
+  server             String
+  userId             String   @db.Uuid
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provisioningError  String?  @db.VarChar(500)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([userId])
 }
 
 model Subscription {

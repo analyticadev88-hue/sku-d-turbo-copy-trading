@@ -210,6 +210,48 @@ Keep the Caddy and bridge windows open. The master terminal is a template only;
 leave it closed while student slots are operating. Do not run `start-all.ps1` a
 second time while services are already running.
 
+### Deploying a bridge-only update without restarting MT5
+
+The `admin` branch's `components\final` directory is the VPS bridge bundle.
+The website/client app is deployed separately from the main branch. For a
+Python bridge or PowerShell-only update:
+
+1. Stop only the bridge PowerShell window with **Ctrl+C**. Do not close the
+   terminal windows and do not use `-RefreshTerminals`.
+2. Copy the updated `components\final` files over `C:\skud\final`. Preserve
+   `C:\skud\final\data\skud.sqlite3`; keep the MT5 master, terminal slots, and
+   DPAPI key in their existing locations.
+3. Start `.\start-bridge.ps1` again. The bridge starts its listener immediately
+   and serves requests while background recovery runs. Recovery detects
+   already-running logins and leaves those terminals alone; it only launches
+   active accounts whose terminals are not running. A bridge restart does not
+   close broker positions.
+4. Caddy does not need a restart for a bridge-only update. If Caddy itself or
+   its configuration changed, restart only its PowerShell window; MT5 terminals
+   do not depend on Caddy for their local bridge polling.
+
+The admin app's **Connected** view stores client-to-login ownership in its
+Prisma database. Apply the tracked Prisma migration to the production database
+before deploying that app update. Older bridge accounts will appear as
+unassigned until their client reconnects; their owner cannot be inferred safely
+from the bridge's existing login records.
+
+This does not update the EA already loaded by running terminals. If the compiled
+EA, chart template, or MT5 WebRequest settings changed and must take effect in
+existing slots, intentionally restart them with
+`.\start-bridge.ps1 -RefreshTerminals`. That briefly interrupts monitoring,
+although positions remain open at the broker.
+
+Bridge console output is quiet by default: startup/recovery and actual errors
+are logged, while routine successful EA polling requests are omitted. Set
+`$env:SKUD_HTTP_ACCESS_LOG = '1'` before running `start-bridge.ps1` to enable
+per-request access logs for diagnosis. Set `SKUD_LOG_LEVEL=DEBUG` to include
+terminal template/slot details; return to `INFO` for normal operation.
+
+The bridge applies SQLite schema creation and migrations once per database path
+at startup, rather than repeating them for every API request. Account and
+mentor-list endpoints also fetch their status/count data in joined queries.
+
 Run the read-only audit at any time:
 
 ```powershell
@@ -235,6 +277,22 @@ template are ready. Submit a Deriv demo login, trading password, and server from
 the website. The dashboard should show the actual
 login/server and wait for a matching EA heartbeat before reporting connected.
 Verify the test account and copied trades in MT5 before inviting anyone else.
+
+`GET /v1/status?login=<login>` returns the latest confirmed balance and currency,
+`state`, `terminal_connected`, `trading_allowed`, `margin_mode`, and
+`copying_ready`. With the currently deployed legacy Student EA,
+`copying_ready` is `null` because the EA does not report account mode; the bridge
+must not claim a mode check passed or failed. An unconfirmed login includes a
+prompt to check the login, trading password, and exact server. MT5 does not
+provide the bridge a reliable broker rejection reason, so the bridge cannot
+distinguish a wrong password from every other login/connection failure.
+
+Copy trading requires a hedging account. Once MT5 reports netting or exchange
+mode, new mentor opens are skipped with `skipped_unsupported_mode` in the
+mentor-event response; previously queued mentor orders are failed rather than
+delivered. The legacy Student EA does not report account mode, so this protection
+cannot identify netting accounts until that information is available. Manual
+orders and already-mapped close requests are unchanged.
 
 Run bridge regression tests from this folder:
 
@@ -301,6 +359,8 @@ Additional endpoints (all require the bridge key except where noted):
   (`login`, `server`, `is_active`, `volume_multiplier`, `role`, plus terminal
   `connected`/`last_seen`/`balance`/`currency` via a LEFT JOIN on
   `terminal_status`), and the latest 50 `trade_events`.
+- `GET /v1/status?login=<login>` — live login confirmation, last confirmed
+  balance, account mode, and copy-readiness state for a registered account.
 - `GET /v1/prices?login=<login>` — price rows filtered to one account (exact
   match, same row shape as the unfiltered list).
 

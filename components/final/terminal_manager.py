@@ -8,6 +8,7 @@ EA/chart-profile installation, process launching, and running-login detection.
 from __future__ import annotations
 
 import os
+import logging
 import re
 import shutil
 import subprocess
@@ -19,6 +20,7 @@ TERMINALS_DIR = Path(os.environ.get("SKUD_TERMINALS_DIR", r"C:\skud\terminals"))
 MENTOR_BRIDGE_KEY = os.environ.get("SKUD_BRIDGE_KEY", "")
 TERMINAL_MASTER = os.environ.get("SKUD_TERMINAL_MASTER", r"C:\skud\mt5-master")
 LAUNCH_STAGGER_SEC = float(os.environ.get("SKUD_LAUNCH_STAGGER_SEC", "5"))
+LOG = logging.getLogger("skud.terminal_manager")
 
 
 def _decode_text(raw: bytes) -> tuple[str, str]:
@@ -101,18 +103,23 @@ MENTOR_CHART_TEMPLATE = _resolve_env_path(
 )
 
 if EA_SOURCE:
-    print(f"SkuD terminal manager: student EA = {EA_SOURCE}")
+    LOG.debug("Student EA template: %s", EA_SOURCE)
 if CHART_TEMPLATE:
-    print(f"SkuD terminal manager: student chart = {CHART_TEMPLATE}")
+    LOG.debug("Student chart template: %s", CHART_TEMPLATE)
 if MENTOR_EA_SOURCE:
-    print(f"SkuD terminal manager: mentor EA = {MENTOR_EA_SOURCE}")
+    LOG.debug("Mentor EA template: %s", MENTOR_EA_SOURCE)
 if MENTOR_CHART_TEMPLATE:
-    print(f"SkuD terminal manager: mentor chart = {MENTOR_CHART_TEMPLATE}")
+    LOG.debug("Mentor chart template: %s", MENTOR_CHART_TEMPLATE)
 
 _running_cache: tuple[set[str], float] = (set(), 0.0)
 _running_lock = threading.Lock()
 _last_launch = 0.0
+
+# Slots just cloned by assign_slot are already exact master copies; ensure_terminal
+# skips its refresh pass for them instead of re-copying hundreds of megabytes.
+_fresh_slots: set[str] = set()
 _launch_lock = threading.Lock()
+_launching_logins: set[str] = set()
 
 
 def normalize_folder(path: str) -> str:
@@ -234,6 +241,7 @@ def assign_slot(used_folders: set[str]) -> Path:
         index += 1
     target = TERMINALS_DIR / f"Slot{index:03d}"
     shutil.copytree(master, target, ignore=shutil.ignore_patterns("startup.ini"))
+    _fresh_slots.add(normalize_folder(str(target)))
     return target
 
 
@@ -467,28 +475,35 @@ def ensure_terminal(account: dict) -> tuple[bool, str]:
     login = str(account["login"])
     folder = Path(account["folder_path"])
     exe = folder / "terminal64.exe"
-    if not exe.exists():
-        note = refresh_slot_from_master(folder)
-        print(f"SkuD MT5 slot {folder.name} for login {login}: {note}")
-        if not exe.exists():
-            return False, f"terminal64.exe not found in {folder} ({note})"
-    if login in running_logins():
-        return True, "already running; restart the managed terminal to apply master MT5 setting changes"
-    refresh_note = refresh_slot_from_master(folder)
-    print(f"SkuD MT5 slot {folder.name} for login {login}: {refresh_note}")
-    try:
-        settings_source, settings_target, expert_settings = sync_master_webrequest_settings(folder)
-    except (OSError, RuntimeError) as exc:
-        return False, str(exc)[:300]
-    role = str(account.get("role", "student") or "student")
-    global _last_launch
+    global _last_launch, _running_cache
     with _launch_lock:
-        wait = LAUNCH_STAGGER_SEC - (time.time() - _last_launch)
-        if wait > 0:
-            time.sleep(wait)
-        _last_launch = time.time()
-    warnings: list[str] = []
+        if login in _launching_logins:
+            return True, "terminal launch already in progress"
+        _launching_logins.add(login)
+
     try:
+        if login in running_logins():
+            return True, "already running; restart the managed terminal to apply master MT5 setting changes"
+        if not exe.exists():
+            note = refresh_slot_from_master(folder)
+            LOG.debug("MT5 slot %s for login %s: %s", folder.name, login, note)
+            if not exe.exists():
+                return False, f"terminal64.exe not found in {folder} ({note})"
+        folder_key = normalize_folder(str(folder))
+        if folder_key in _fresh_slots:
+            _fresh_slots.discard(folder_key)
+            refresh_note = "fresh slot; refresh skipped"
+        else:
+            refresh_note = refresh_slot_from_master(folder)
+        LOG.debug("MT5 slot %s for login %s: %s", folder.name, login, refresh_note)
+        settings_source, settings_target, expert_settings = sync_master_webrequest_settings(folder)
+        role = str(account.get("role", "student") or "student")
+        with _launch_lock:
+            wait = LAUNCH_STAGGER_SEC - (time.time() - _last_launch)
+            if wait > 0:
+                time.sleep(wait)
+            _last_launch = time.time()
+        warnings: list[str] = []
         # MT5 parses startup.ini using the system ANSI codepage, so encode with
         # mbcs on Windows — ascii with errors="replace" would silently corrupt
         # any non-ASCII password character into "?" and the broker login fails.
@@ -512,13 +527,17 @@ def ensure_terminal(account: dict) -> tuple[bool, str]:
         if profile:
             launch_args.append(f"/profile:{profile}")
         subprocess.Popen(launch_args, cwd=str(folder), close_fds=True)
-        print(
-            f"SkuD MT5 WebRequest settings synced for login {login}: "
-            f"{settings_source} -> {settings_target}"
-        )
+        with _running_lock:
+            cached, _cached_at = _running_cache
+            _running_cache = (cached | {login}, time.time())
+        LOG.info("MT5 terminal launched for login %s", login)
         return True, "; ".join(warnings) if warnings else "launched"
     except Exception as exc:
+        LOG.exception("MT5 terminal launch failed for login %s", login)
         return False, str(exc)[:200]
+    finally:
+        with _launch_lock:
+            _launching_logins.discard(login)
 
 
 def _install_student_files(folder: Path, warnings: list[str]) -> None:

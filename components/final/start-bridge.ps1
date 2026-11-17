@@ -107,20 +107,17 @@ $env:SKUD_ALLOWED_ORIGIN = 'https://skudturbo.vercel.app'
 $env:SKUD_HOST = '127.0.0.1'
 $env:SKUD_PORT = '8765'
 $env:SKUD_DB_PATH = Join-Path $PSScriptRoot 'data\skud.sqlite3'
+$env:SKUD_REFRESH_TERMINALS_ON_BOOT = if ($RefreshTerminals) { '1' } else { '0' }
 New-Item -ItemType Directory -Force -Path (Split-Path $env:SKUD_DB_PATH) | Out-Null
 
 Write-Host ''
 Write-Host 'SkuD MT5 bridge is starting.' -ForegroundColor Green
 Write-Host "Persistent SkuD bridge key loaded for Windows user $env:USERNAME."
 Write-Host ''
-Write-Host 'Re-launching terminals for active accounts that are not running...' -ForegroundColor DarkGray
 if ($RefreshTerminals) {
     Write-Warning 'Refresh requested: all terminal64.exe processes under the managed SkuD slots directory will be closed, refreshed from the master EA/chart files, and restarted. Positions already held by the broker remain open, but monitoring is interrupted briefly.'
-}
-$refreshValue = if ($RefreshTerminals) { 'True' } else { 'False' }
-& $pythonCommand.Source @pythonArguments -c "import bridge; bridge.reconcile_on_boot(force_refresh=$refreshValue)"
-if ($LASTEXITCODE -ne 0) {
-    throw "Terminal reconciliation failed with exit code $LASTEXITCODE. Check the Python installation and bridge files."
+} else {
+    Write-Host 'Existing MT5 terminals will be left running; missing active terminals will be recovered after the bridge listener starts.' -ForegroundColor DarkGray
 }
 Write-Host ''
 Write-Host 'Bridge is loopback-only at http://127.0.0.1:8765; Caddy serves it over HTTPS. Do not expose port 8765.'

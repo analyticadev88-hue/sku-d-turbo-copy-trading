@@ -3,20 +3,22 @@
 import { useState } from 'react'
 import { useEffect } from 'react'
 import Link from 'next/link'
-import { Cable, Download, LineChart, Share, Users } from 'lucide-react'
+import { Activity, Cable, Download, LineChart, Share, Users } from 'lucide-react'
 import { getBrowserSupabase } from '@/lib/supabase'
 import { DerivMark } from './deriv-logo'
 import { AdminClients } from './admin-clients'
+import { AdminConnected } from './admin-connected'
 import { AdminMt5 } from './admin-mt5'
 import { AdminTrade } from './admin-trade'
 import { ServerPayModal } from './server-pay-modal'
 
-export type AdminTab = 'home' | 'clients' | 'mt5'
+export type AdminTab = 'home' | 'clients' | 'mt5' | 'connected'
 
 const TABS: { id: AdminTab; label: string; icon: typeof LineChart }[] = [
   { id: 'home', label: 'Home', icon: LineChart },
   { id: 'clients', label: 'Clients', icon: Users },
   { id: 'mt5', label: 'MT5', icon: Cable },
+  { id: 'connected', label: 'Connected', icon: Activity },
 ]
 
 export function AdminApp() {
@@ -151,19 +153,20 @@ export function AdminApp() {
         {tab === 'home' && <AdminTrade switchTab={setTab} />}
         {tab === 'clients' && <AdminClients />}
         {tab === 'mt5' && <AdminMt5 switchTab={setTab} />}
+        {tab === 'connected' && <AdminConnected />}
       </div>
 
       <ServerPayModal />
 
       <nav aria-label="Admin navigation" className="fixed inset-x-0 bottom-[max(1rem,env(safe-area-inset-bottom))] z-30 flex justify-center px-3">
-        <div className="flex items-center gap-1 rounded-full border border-white/10 bg-[#111114]/95 px-2 py-2 shadow-[0_12px_40px_rgba(0,0,0,0.5)] backdrop-blur">
+        <div className="flex items-center gap-0.5 rounded-full border border-white/10 bg-[#111114]/95 px-1.5 py-2 shadow-[0_12px_40px_rgba(0,0,0,0.5)] backdrop-blur">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               type="button"
               onClick={() => setTab(id)}
               aria-current={tab === id ? 'page' : undefined}
-              className={`inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-[11px] font-extrabold uppercase tracking-[0.14em] transition-all ${tab === id ? 'bg-primary text-white' : 'text-white/55 hover:text-white'}`}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-2.5 text-[10px] font-extrabold uppercase tracking-[0.1em] transition-all sm:gap-2 sm:px-5 sm:text-[11px] sm:tracking-[0.14em] ${tab === id ? 'bg-primary text-white' : 'text-white/55 hover:text-white'}`}
             >
               <Icon className="size-4" aria-hidden="true" />
               {label}

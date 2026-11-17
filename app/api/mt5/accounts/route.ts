@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto'
 import { requireApprovedUser } from '@/lib/access-control'
 import { DERIV_SERVERS } from '@/lib/mt5-servers'
+import { prisma } from '@/lib/prisma'
 
 function jsonError(error: string, status: number) {
   return Response.json({ error }, { status, headers: { 'Cache-Control': 'no-store' } })
@@ -45,6 +46,45 @@ export async function POST(request: Request) {
     return jsonError('Live accounts are disabled. Use an MT5 demo account for this test.', 403)
   }
 
+  try {
+    const existing = await prisma.mt5Account.findUnique({ where: { login } })
+    if (existing && existing.userId !== access.user.id) {
+      return jsonError('This MT5 account is already linked to another SkuD client.', 409)
+    }
+    if (existing) {
+      await prisma.mt5Account.update({
+        where: { login },
+        data: { server, provisioningError: null },
+      })
+    } else {
+      try {
+        await prisma.mt5Account.create({
+          data: { login, server, userId: access.user.id },
+        })
+      } catch (error) {
+        const linkedDuringRequest = await prisma.mt5Account.findUnique({ where: { login } })
+        if (!linkedDuringRequest) throw error
+        if (linkedDuringRequest.userId !== access.user.id) {
+          return jsonError('This MT5 account is already linked to another SkuD client.', 409)
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[mt5 enroll] could not link account to client', login, error)
+    return jsonError('Could not save your MT5 account details. Please try again.', 503)
+  }
+
+  async function recordProvisioningError(message: string) {
+    try {
+      await prisma.mt5Account.update({
+        where: { login },
+        data: { provisioningError: message.slice(0, 500) },
+      })
+    } catch (error) {
+      console.error('[mt5 enroll] could not save terminal provisioning error', login, error)
+    }
+  }
+
   let bridgeResponse: Response
   try {
     bridgeResponse = await fetch(`${bridgeUrl.replace(/\/$/, '')}/v1/accounts`, {
@@ -61,6 +101,7 @@ export async function POST(request: Request) {
     })
   } catch {
     console.error('[mt5 enroll] could not reach the bridge for login', login)
+    await recordProvisioningError('The bridge could not be reached while starting this account.')
     return jsonError('We could not connect your MT5 account right now. Please try again in a moment or contact your mentor.', 502)
   }
 
@@ -69,10 +110,14 @@ export async function POST(request: Request) {
     | null
   if (!bridgeResponse.ok) {
     console.error('[mt5 enroll] bridge rejected login', login, bridgeResponse.status, JSON.stringify(bridgeBody))
+    await recordProvisioningError(
+      bridgeBody?.error ?? `The bridge rejected account startup (HTTP ${bridgeResponse.status}).`,
+    )
     return jsonError('We could not connect your MT5 account right now. Please try again in a moment or contact your mentor.', bridgeResponse.status)
   }
   if (!bridgeBody?.launched) {
     console.error('[mt5 enroll] bridge could not launch terminal for login', login, JSON.stringify(bridgeBody))
+    await recordProvisioningError(bridgeBody?.error ?? 'The bridge did not start the MT5 terminal.')
     return jsonError('We could not connect your MT5 account right now. Please try again in a moment or contact your mentor.', 502)
   }
 
