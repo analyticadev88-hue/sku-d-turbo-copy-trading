@@ -51,6 +51,8 @@ $requiredBridgeFiles = @(
     'start-all.ps1',
     'start-bridge.ps1',
     'start-caddy.ps1',
+    'reconcile-terminals.ps1',
+    'desktop-heap.ps1',
     'Caddyfile',
     'SkuDTurboStudentCore.mqh',
     'SkuDTurboMentorEA.mq5',

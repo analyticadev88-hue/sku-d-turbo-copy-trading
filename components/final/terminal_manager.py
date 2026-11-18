@@ -150,12 +150,18 @@ def running_logins(ttl: float = 10.0) -> set[str]:
             text=True,
             timeout=15,
         )
-        for line in result.stdout.splitlines():
-            line = line.strip()
-            if line.isdigit():
-                logins.add(line)
-    except Exception:
-        logins = set()
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError(f"Could not inspect running MT5 terminals: {error}") from error
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise RuntimeError(
+            "Could not inspect running MT5 terminals"
+            + (f": {detail}" if detail else f" (PowerShell exited with code {result.returncode})")
+        )
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if line.isdigit():
+            logins.add(line)
     with _running_lock:
         _running_cache = (logins, now)
     return set(logins)

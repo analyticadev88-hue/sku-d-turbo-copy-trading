@@ -259,6 +259,54 @@ Set-Location C:\skud\final
 .\audit-vps.ps1
 ```
 
+### Diagnosing Windows desktop-heap exhaustion
+
+Windows desktop heap is a per-desktop resource, not a configurable MT5 instance
+cap. First run the diagnostic from an elevated PowerShell window on the VPS:
+
+```powershell
+Set-Location C:\skud\final
+.\desktop-heap.ps1
+```
+
+It reports the current `SharedSection` values, MT5 process count, and recent
+System log Win32k event 243 entries. Microsoft recommends changing desktop heap
+only when exhaustion is evidenced; for terminals running in the interactive VPS
+desktop, the second value controls the interactive heap and must not exceed
+20480 KB. The third value is for non-interactive window stations. This script
+does not change that value or session 0.
+
+If event 243 confirms exhaustion and the interactive value is below 20480 KB,
+the opt-in command backs up the SubSystems registry key under
+`C:\ProgramData\SkuD\backups`, asks for confirmation, and changes only the
+interactive value:
+
+```powershell
+.\desktop-heap.ps1 -Apply
+```
+
+Schedule a VPS reboot for the change to take effect; this interrupts all
+terminals and services. If MT5 fails to launch without event 243, inspect its
+bridge provisioning error, Windows Application/System logs, free RAM/disk, and
+the terminal slot clone/launch logs first rather than changing desktop heap.
+See Microsoft's [desktop heap guidance](https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/desktop-heap-limitation-out-of-memory).
+
+Check active accounts against running MT5 processes and recent EA heartbeats:
+
+```powershell
+Set-Location C:\skud\final
+.\reconcile-terminals.ps1
+```
+
+The report is read-only and distinguishes missing processes from terminals that
+are running but have not confirmed an EA heartbeat. To launch only missing
+active accounts, use `.\reconcile-terminals.ps1 -RecoverMissing` and type
+`LAUNCH` when prompted. The bridge re-checks processes immediately before
+launching; it never stops running terminals. A launch request does not confirm
+broker authorization, so rerun the report after MT5 has had time to connect.
+Run the script as the same Windows user that starts the bridge so its DPAPI
+protected key can be read.
+
 ## 6. Register the mentor and test a demo student
 
 After the bridge health check succeeds, register the mentor through the

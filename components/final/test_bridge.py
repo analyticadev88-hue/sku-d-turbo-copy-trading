@@ -257,6 +257,50 @@ class BridgeTests(unittest.TestCase):
         stop_managed.assert_called_once_with()
         ensure.assert_called_once()
 
+    def test_manual_reconcile_only_launches_missing_active_accounts(self):
+        self.provision("123456")
+        self.provision("654321")
+        self.provision("777777")
+        with bridge.db_session() as db:
+            db.execute("UPDATE accounts SET is_active=0 WHERE login='777777'")
+
+        with patch.object(bridge.tm, "running_logins", return_value={"123456"}), \
+             patch.object(bridge.tm, "ensure_terminal", return_value=(True, "launched")) as ensure:
+            status, body = self.request("/v1/terminals/reconcile", "POST", BRIDGE_KEY)
+
+        result = json.loads(body)
+        self.assertEqual(status, 200)
+        self.assertEqual(result["active_accounts"], 2)
+        self.assertEqual(result["already_running"], 1)
+        self.assertEqual(result["launch_requested"], 1)
+        self.assertEqual(result["failed"], 0)
+        self.assertEqual([item["login"] for item in result["results"]], ["123456", "654321"])
+        ensure.assert_called_once()
+        self.assertEqual(ensure.call_args.args[0]["login"], "654321")
+
+    def test_manual_reconcile_requires_bridge_authentication(self):
+        with patch.object(bridge.tm, "ensure_terminal") as ensure:
+            status, _body = self.request("/v1/terminals/reconcile", "POST")
+        self.assertEqual(status, 401)
+        ensure.assert_not_called()
+
+    def test_manual_reconcile_fails_closed_when_process_scan_fails(self):
+        self.provision()
+        with patch.object(bridge.tm, "running_logins", side_effect=RuntimeError("PowerShell unavailable")), \
+             patch.object(bridge.tm, "ensure_terminal") as ensure:
+            status, body = self.request("/v1/terminals/reconcile", "POST", BRIDGE_KEY)
+        self.assertEqual(status, 503)
+        self.assertIn("PowerShell unavailable", json.loads(body)["error"])
+        ensure.assert_not_called()
+
+    def test_fresh_account_report_bypasses_process_cache(self):
+        self.provision()
+        with patch.object(bridge.tm, "running_logins", return_value={"123456"}) as running:
+            status, body = self.request("/v1/accounts?fresh=1", token=BRIDGE_KEY)
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["accounts"][0]["terminal_running"])
+        running.assert_called_once_with(ttl=0)
+
     def test_start_reconciliation_in_background_uses_daemon_worker(self):
         with patch.object(bridge, "reconcile_on_boot") as reconcile:
             worker = bridge.start_reconciliation_in_background(force_refresh=True)

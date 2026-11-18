@@ -10,6 +10,7 @@ type ConnectedAccount = {
   clientEmail: string | null
   state: string
   is_active: boolean
+  terminal_running: boolean
   ea_connected: boolean
   balance: number | null
   balance_updated_at: number | null
@@ -88,9 +89,14 @@ export function AdminConnected() {
   }, [load])
 
   const activeCount = accounts?.filter((account) => account.is_active).length ?? 0
-  const connectedCount = accounts?.filter((account) => account.ea_connected).length ?? 0
+  const runningCount = accounts?.filter((account) =>
+    account.is_active && account.terminal_running,
+  ).length ?? 0
+  const connectedCount = accounts?.filter((account) =>
+    account.is_active && account.ea_connected,
+  ).length ?? 0
   const attentionCount = accounts?.filter((account) =>
-    account.is_active && (!account.ea_connected || account.state === 'mode_unknown'),
+    account.is_active && account.state !== 'connected',
   ).length ?? 0
 
   return (
@@ -118,20 +124,29 @@ export function AdminConnected() {
       </div>
 
       {accounts && (
-        <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-3">
-          <div className="rounded-xl border border-white/15 bg-[#111114] p-3 text-center">
-            <p className="text-xl font-extrabold text-white">{activeCount}</p>
-            <p className="mt-1 text-[9px] font-extrabold uppercase tracking-[0.12em] text-white/45">Active</p>
+        <>
+          <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+            <div className="rounded-xl border border-white/15 bg-[#111114] p-3 text-center">
+              <p className="text-xl font-extrabold text-white">{activeCount}</p>
+              <p className="mt-1 text-[9px] font-extrabold uppercase tracking-[0.12em] text-white/45">Active</p>
+            </div>
+            <div className="rounded-xl border border-white/15 bg-[#111114] p-3 text-center">
+              <p className="text-xl font-extrabold text-white">{runningCount}</p>
+              <p className="mt-1 text-[9px] font-extrabold uppercase tracking-[0.12em] text-white/45">MT5 process running</p>
+            </div>
+            <div className="rounded-xl border border-[#4bb543]/35 bg-[#111114] p-3 text-center">
+              <p className="text-xl font-extrabold text-[#4bb543]">{connectedCount}</p>
+              <p className="mt-1 text-[9px] font-extrabold uppercase tracking-[0.12em] text-white/45">EA / broker connected</p>
+            </div>
+            <div className="rounded-xl border border-primary/35 bg-[#111114] p-3 text-center">
+              <p className="text-xl font-extrabold text-primary">{attentionCount}</p>
+              <p className="mt-1 text-[9px] font-extrabold uppercase tracking-[0.12em] text-white/45">Needs attention</p>
+            </div>
           </div>
-          <div className="rounded-xl border border-[#4bb543]/35 bg-[#111114] p-3 text-center">
-            <p className="text-xl font-extrabold text-[#4bb543]">{connectedCount}</p>
-            <p className="mt-1 text-[9px] font-extrabold uppercase tracking-[0.12em] text-white/45">Terminal online</p>
-          </div>
-          <div className="rounded-xl border border-primary/35 bg-[#111114] p-3 text-center">
-            <p className="text-xl font-extrabold text-primary">{attentionCount}</p>
-            <p className="mt-1 text-[9px] font-extrabold uppercase tracking-[0.12em] text-white/45">Needs attention</p>
-          </div>
-        </div>
+          <p className="mt-2 text-[10px] leading-relaxed text-white/40">
+            A running MT5 process is not proof of broker login. Attention includes disconnected accounts and connected accounts whose trading readiness cannot be confirmed.
+          </p>
+        </>
       )}
 
       {lastLoadedAt && (
@@ -187,6 +202,14 @@ export function AdminConnected() {
                 </p>
               )}
               <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                <p className={account.terminal_running ? 'text-[#4bb543]' : 'text-amber-300'}>
+                  <span className="text-white/40">Windows MT5 process: </span>
+                  {account.terminal_running ? 'Running' : 'Not detected'}
+                </p>
+                <p className={account.ea_connected ? 'text-[#4bb543]' : 'text-white/50'}>
+                  <span className="text-white/40">EA / broker: </span>
+                  {account.ea_connected ? 'Connected' : 'Not confirmed'}
+                </p>
                 <p className="text-white/75">
                   <span className="text-white/40">Balance: </span>{balance}
                 </p>

@@ -563,33 +563,57 @@ def scale_follower_volume(db: sqlite3.Connection, follower: sqlite3.Row, symbol:
     return round(scaled, 8)
 
 
+def reconcile_missing_terminals() -> dict:
+    """Launch active accounts whose managed MT5 terminal is not currently running."""
+    running = tm.running_logins(ttl=0)
+    with db_session() as db:
+        rows = db.execute("SELECT * FROM accounts WHERE is_active=1").fetchall()
+    results = []
+    for row in rows:
+        login = row["login"]
+        if login in running:
+            results.append({"login": login, "status": "already_running"})
+            continue
+        ok, message = tm.ensure_terminal(dict(row))
+        if not ok:
+            status = "failed"
+        elif "already running" in message:
+            status = "already_running"
+        elif "in progress" in message:
+            status = "in_progress"
+        else:
+            status = "launch_requested"
+        results.append({"login": login, "status": status, "message": message})
+    return {
+        "active_accounts": len(rows),
+        "already_running": sum(result["status"] == "already_running" for result in results),
+        "launch_requested": sum(result["status"] == "launch_requested" for result in results),
+        "in_progress": sum(result["status"] == "in_progress" for result in results),
+        "failed": sum(result["status"] == "failed" for result in results),
+        "results": results,
+    }
+
+
 def reconcile_on_boot(force_refresh: bool = False) -> None:
     """Launch active accounts, optionally closing and refreshing managed terminals first."""
     if force_refresh:
         LOG.warning("Closing managed MT5 terminals before refreshing EA/profile files")
         tm.stop_managed_terminals()
-    running = tm.running_logins(ttl=0)
-    with db_session() as db:
-        rows = db.execute("SELECT * FROM accounts WHERE is_active=1").fetchall()
-    already_running = 0
-    launched = 0
-    failed = 0
-    for row in rows:
-        if row["login"] in running:
-            already_running += 1
-            continue
-        ok, message = tm.ensure_terminal(dict(row))
-        if ok:
-            launched += 1
-        else:
-            failed += 1
-            LOG.error("Terminal recovery failed for login %s: %s", row["login"], message)
+    try:
+        result = reconcile_missing_terminals()
+    except RuntimeError as error:
+        LOG.error("Terminal recovery skipped because running terminals could not be enumerated: %s", error)
+        return
+    for account in result["results"]:
+        if account["status"] == "failed":
+            LOG.error("Terminal recovery failed for login %s: %s", account["login"], account["message"])
     LOG.info(
-        "Terminal recovery complete: %d active, %d already running, %d launched, %d failed",
-        len(rows),
-        already_running,
-        launched,
-        failed,
+        "Terminal recovery complete: %d active, %d already running, %d launch requested, %d in progress, %d failed",
+        result["active_accounts"],
+        result["already_running"],
+        result["launch_requested"],
+        result["in_progress"],
+        result["failed"],
     )
 
 
@@ -806,7 +830,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
         if parsed.path == "/v1/accounts":
             if not client_authed(self.headers.get("Authorization", "")):
                 return self._send(401, {"error": "Unauthorized"})
-            running = tm.running_logins()
+            fresh_process_scan = parse_qs(parsed.query).get("fresh", [""])[0] == "1"
+            running = tm.running_logins(ttl=0 if fresh_process_scan else 10)
             now = time.time()
             with db_session() as db:
                 rows = db.execute(
@@ -1101,6 +1126,15 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/v1/terminals/reconcile":
+            if not client_authed(self.headers.get("Authorization", "")):
+                return self._send(401, {"error": "Unauthorized"})
+            try:
+                result = reconcile_missing_terminals()
+            except RuntimeError as error:
+                LOG.error("Manual terminal recovery could not safely enumerate running terminals: %s", error)
+                return self._send(503, {"error": str(error)})
+            return self._send(200, result)
         if parsed.path == "/v1/mentors":
             if not client_authed(self.headers.get("Authorization", "")):
                 return self._send(401, {"error": "Unauthorized"})
