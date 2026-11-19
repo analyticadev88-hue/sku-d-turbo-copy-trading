@@ -1351,6 +1351,19 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 "launched": launched,
                 "message": message,
             })
+        match = re.fullmatch(r"/v1/accounts/(\d{4,20})/launch", parsed.path)
+        if match:
+            if not client_authed(self.headers.get("Authorization", "")):
+                return self._send(401, {"error": "Unauthorized"})
+            login = match.group(1)
+            with db_session() as db:
+                account = db.execute("SELECT * FROM accounts WHERE login=?", (login,)).fetchone()
+            if not account:
+                return self._send(404, {"error": "Unknown account."})
+            if not account["is_active"]:
+                return self._send(409, {"error": "Account is deactivated. Reconnect it from the app first."})
+            ok, message = tm.ensure_terminal(dict(account))
+            return self._send(200 if ok else 503, {"login": login, "launched": ok, "message": message})
         match = re.fullmatch(r"/v1/accounts/(\d{4,20})/deactivate", parsed.path)
         if match:
             if not client_authed(self.headers.get("Authorization", "")):

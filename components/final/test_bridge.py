@@ -951,6 +951,20 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(self.request("/v1/accounts/123456/mentor", "POST", BRIDGE_KEY,
                                       {"volume_multiplier": 200})[0], 400)
 
+    def test_launch_endpoint_starts_one_account(self):
+        self.provision(login="123456", mentor_id="mentor-skud-01")
+        status, _ = self.request("/v1/accounts/123456/launch", "POST", BRIDGE_KEY)
+        self.assertEqual(status, 200)
+        with bridge.db_session() as db:
+            row = db.execute("SELECT is_active FROM accounts WHERE login='123456'").fetchone()
+        self.assertEqual(row["is_active"], 1)
+
+    def test_launch_endpoint_rejects_unknown_or_inactive(self):
+        self.assertEqual(self.request("/v1/accounts/999999/launch", "POST", BRIDGE_KEY)[0], 404)
+        self.provision(login="123456", mentor_id="mentor-skud-01")
+        self.assertEqual(self.request("/v1/accounts/123456/deactivate", "POST", BRIDGE_KEY)[0], 200)
+        self.assertEqual(self.request("/v1/accounts/123456/launch", "POST", BRIDGE_KEY)[0], 409)
+
     def test_mentor_open_event_scales_follower_volumes(self):
         self.register_mentor()
         self.provision(login="111111", mentor_id="mentor-skud-01", volume_multiplier=2)
