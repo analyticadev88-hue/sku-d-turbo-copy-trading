@@ -21,6 +21,19 @@ type TerminalStatus = {
   error?: string
 }
 
+type BridgeAccount = {
+  login?: unknown
+  server?: unknown
+  is_active?: unknown
+  terminal_running?: unknown
+  ea_connected?: unknown
+  last_seen?: unknown
+  message?: unknown
+  role?: unknown
+  mentor_id?: unknown
+  volume_multiplier?: unknown
+}
+
 function loadStored(): StoredAdminAccount | null {
   if (typeof window === 'undefined') return null
   try {
@@ -34,6 +47,17 @@ function loadStored(): StoredAdminAccount | null {
   }
 }
 
+function formatHeartbeatAge(lastSeen: number): string {
+  const ageSeconds = Math.max(0, Math.floor(Date.now() / 1000 - lastSeen))
+  if (ageSeconds < 60) return `${ageSeconds}s ago`
+  if (ageSeconds < 3600) return `${Math.floor(ageSeconds / 60)}m ago`
+  return `${Math.floor(ageSeconds / 3600)}h ago`
+}
+
+function statusBadgeClass(ok: boolean): string {
+  return ok ? 'text-[#4bb543]' : 'text-primary'
+}
+
 export function AdminMt5({ switchTab }: { switchTab: (tab: AdminTab) => void }) {
   const [connected, setConnected] = useState<StoredAdminAccount | null>(null)
   const [login, setLogin] = useState('')
@@ -43,6 +67,7 @@ export function AdminMt5({ switchTab }: { switchTab: (tab: AdminTab) => void }) 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<TerminalStatus | null>(null)
+  const [accountRow, setAccountRow] = useState<BridgeAccount | null>(null)
 
   useEffect(() => {
     setConnected(loadStored())
@@ -53,12 +78,26 @@ export function AdminMt5({ switchTab }: { switchTab: (tab: AdminTab) => void }) 
       const { data: sessionData } = await getBrowserSupabase().auth.getSession()
       const accessToken = sessionData.session?.access_token
       if (!accessToken) return
-      const response = await fetch(`/api/admin/mt5?login=${encodeURIComponent(targetLogin)}`, {
-        headers: { 'x-supabase-access-token': accessToken },
-        cache: 'no-store',
-      })
-      const result = await response.json().catch(() => null) as TerminalStatus | null
-      if (response.ok && result) setStatus(result)
+
+      const [statusResponse, accountsResponse] = await Promise.all([
+        fetch(`/api/admin/mt5?login=${encodeURIComponent(targetLogin)}`, {
+          headers: { 'x-supabase-access-token': accessToken },
+          cache: 'no-store',
+        }),
+        fetch('/api/admin/bridge?path=accounts', {
+          headers: { 'x-supabase-access-token': accessToken },
+          cache: 'no-store',
+        }),
+      ])
+
+      const statusResult = await statusResponse.json().catch(() => null) as TerminalStatus | null
+      if (statusResponse.ok && statusResult) setStatus(statusResult)
+
+      const accountsResult = await accountsResponse.json().catch(() => null) as BridgeAccount[] | { accounts?: BridgeAccount[] } | null
+      const rows = Array.isArray(accountsResult)
+        ? accountsResult
+        : Array.isArray(accountsResult?.accounts) ? accountsResult.accounts : []
+      setAccountRow(rows.find((row) => String(row?.login ?? '') === targetLogin) ?? null)
     } catch {
       // Keep the last known status on transient failures.
     }
@@ -67,6 +106,7 @@ export function AdminMt5({ switchTab }: { switchTab: (tab: AdminTab) => void }) 
   useEffect(() => {
     if (!connected) {
       setStatus(null)
+      setAccountRow(null)
       return
     }
     void loadStatus(connected.login)
@@ -132,6 +172,7 @@ export function AdminMt5({ switchTab }: { switchTab: (tab: AdminTab) => void }) 
       window.localStorage.removeItem(STORAGE_KEY)
       setConnected(null)
       setStatus(null)
+      setAccountRow(null)
       // Hard refresh so no stale account state survives the disconnect.
       window.location.reload()
     } catch (disconnectError) {
@@ -145,6 +186,17 @@ export function AdminMt5({ switchTab }: { switchTab: (tab: AdminTab) => void }) 
   const isTerminalConnected = Boolean(status?.terminal_connected)
   const balance = Number(status?.balance ?? 0)
   const currency = String(status?.currency ?? '')
+
+  const terminalRunning = Boolean(accountRow?.terminal_running)
+  const lastSeen = typeof accountRow?.last_seen === 'number' ? accountRow.last_seen : null
+  const heartbeatAge = lastSeen ? formatHeartbeatAge(lastSeen) : null
+  const heartbeatFresh = lastSeen !== null && (Date.now() / 1000 - lastSeen) < 45
+  const eaConnected = heartbeatFresh
+  const reportedServer = String(status?.reported_server ?? '')
+  const expectedServer = String(status?.expected_server ?? connected?.server ?? '')
+  const serverMatches = !reportedServer || reportedServer === expectedServer
+  const eaMessage = String(accountRow?.message ?? status?.message ?? '').trim()
+  const role = String(accountRow?.role ?? 'student')
 
   return (
     <section className="mx-auto max-w-xl">
@@ -222,25 +274,49 @@ export function AdminMt5({ switchTab }: { switchTab: (tab: AdminTab) => void }) 
               <div className="min-w-0">
                 <p className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-white/45">Connected account</p>
                 <p className="mt-1.5 font-mono text-lg font-extrabold">{connected.login}@{connected.server}</p>
-                <p className="mt-1.5 flex items-center gap-1.5 text-xs text-white/55">
-                  <span
-                    aria-hidden="true"
-                    className={`inline-block size-2 rounded-full ${isTerminalConnected ? 'bg-[#4bb543]' : 'bg-white/25'}`}
-                  />
-                  {isTerminalConnected
-                    ? `Terminal connected${currency ? ` · ${Number.isFinite(balance) ? balance.toFixed(2) : '0.00'} ${currency}` : ''}`
-                    : (String(status?.message ?? '') || 'Waiting for the terminal to confirm the broker login…')}
-                </p>
-                {!isTerminalConnected && status && String(status.reported_server ?? '') && (
-                  <p className="mt-1 text-[11px] text-white/45">
-                    MT5 reports server {String(status.reported_server)}; expected {String(status.expected_server ?? connected.server)}.
-                  </p>
-                )}
               </div>
               <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[9px] font-extrabold uppercase tracking-[0.12em] ${isTerminalConnected ? 'border-[#4bb543]/40 text-[#4bb543]' : 'border-white/20 text-white/45'}`}>
                 {isTerminalConnected ? 'Connected' : 'Pending'}
               </span>
             </div>
+
+            <dl className="mt-3 divide-y divide-white/10 border-y border-white/10 text-xs">
+              <div className="flex items-center justify-between gap-3 py-2.5">
+                <dt className="text-white/50">Terminal process</dt>
+                <dd className={`font-bold ${terminalRunning ? 'text-[#4bb543]' : 'text-primary'}`}>
+                  {accountRow ? (terminalRunning ? 'Running' : 'Stopped') : '…'}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-3 py-2.5">
+                <dt className="text-white/50">Student EA heartbeat</dt>
+                <dd className={`font-bold ${statusBadgeClass(eaConnected)}`}>
+                  {!accountRow ? '…' : heartbeatAge === null ? 'Never — EA not running' : eaConnected ? `Live · ${heartbeatAge}` : `Stale · ${heartbeatAge}`}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-3 py-2.5">
+                <dt className="text-white/50">Broker login</dt>
+                <dd className={`text-right font-bold ${serverMatches ? 'text-[#4bb543]' : 'text-primary'}`}>
+                  {reportedServer ? (serverMatches ? `${reportedServer} ✓` : `${reportedServer} ≠ expected ${expectedServer}`) : 'Waiting for EA…'}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-3 py-2.5">
+                <dt className="text-white/50">Balance</dt>
+                <dd className="font-mono font-extrabold">
+                  {isTerminalConnected && Number.isFinite(balance) ? `${balance.toFixed(2)} ${currency}` : '—'}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-3 py-2.5">
+                <dt className="text-white/50">Role</dt>
+                <dd className="font-bold text-white/80">{role}</dd>
+              </div>
+              {eaMessage && (
+                <div className="py-2.5">
+                  <dt className="text-white/50">EA says</dt>
+                  <dd className="mt-1 leading-relaxed text-white/70">{eaMessage}</dd>
+                </div>
+              )}
+            </dl>
+
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
@@ -260,6 +336,11 @@ export function AdminMt5({ switchTab }: { switchTab: (tab: AdminTab) => void }) 
               </button>
             </div>
           </article>
+          <p className="text-[11px] leading-relaxed text-white/40">
+            Refreshes every 5 seconds. A running terminal with a stale heartbeat means the EA inside MT5 is not
+            attached or cannot reach the bridge — restart that terminal from the VPS. A server mismatch means the
+            account should be reconnected with the exact server name.
+          </p>
         </div>
       )}
     </section>

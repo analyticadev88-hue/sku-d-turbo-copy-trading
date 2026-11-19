@@ -532,7 +532,12 @@ def ensure_terminal(account: dict) -> tuple[bool, str]:
         launch_args = [str(exe), "/portable", f"/config:{folder / 'startup.ini'}"]
         if profile:
             launch_args.append(f"/profile:{profile}")
-        subprocess.Popen(launch_args, cwd=str(folder), close_fds=True)
+        # Start minimized: dozens of restored MT5 windows choke the RDP session
+        # (busy cursor, sluggish input) even though the EAs only need the process.
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags = subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 6  # SW_SHOWMINIMIZED
+        subprocess.Popen(launch_args, cwd=str(folder), close_fds=True, startupinfo=startupinfo)
         with _running_lock:
             cached, _cached_at = _running_cache
             _running_cache = (cached | {login}, time.time())
