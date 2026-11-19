@@ -37,13 +37,19 @@ export function Mt5ConnectDialog({
     const login = String(formData.get('login') ?? '').trim()
     const password = String(formData.get('password') ?? '')
     const server = String(formData.get('server') ?? '')
+
+    if (!/^\d{4,20}$/.test(login)) {
+      setFormMessage('Your MT5 login ID is the number shown in your MetaTrader app — digits only, for example 34312794.')
+      return
+    }
+
     setIsSubmitting(true)
-    setFormMessage('Submitting account to the MT5 bridge...')
+    setFormMessage('Adding your account to the host server...')
 
     try {
       const { data: sessionData } = await getBrowserSupabase().auth.getSession()
       const accessToken = sessionData.session?.access_token
-      if (!accessToken) throw new Error('Sign in to your approved account before connecting MT5.')
+      if (!accessToken) throw new Error('Please sign in again, then add your account.')
       const response = await fetch('/api/mt5/accounts', {
         method: 'POST',
         headers: {
@@ -59,16 +65,16 @@ export function Mt5ConnectDialog({
         server?: string
         statusToken?: string
       }
-      if (!response.ok) throw new Error(result.error ?? 'Could not submit the MT5 account.')
+      if (!response.ok) throw new Error(result.error ?? 'Server offline at the moment. Please try again shortly.')
       if (!result.login || !result.server || !result.statusToken) {
-        throw new Error('The MT5 bridge returned incomplete account status details.')
+        throw new Error('Your account was added and is being set up. Please reopen this screen in a minute.')
       }
 
       saveStoredAccount({ login: result.login, server: result.server, statusToken: result.statusToken })
       form.reset()
       window.location.assign('/dashboard?portal=1')
     } catch (error) {
-      setFormMessage(error instanceof Error ? error.message : 'Could not submit the MT5 account.')
+      setFormMessage(error instanceof Error ? error.message : 'Server offline at the moment. Please try again shortly.')
       setIsSubmitting(false)
     }
   }
@@ -83,7 +89,7 @@ export function Mt5ConnectDialog({
             <DialogHeader>
               <DialogTitle className="text-xl font-extrabold">Connect an MT5 account</DialogTitle>
               <DialogDescription className="text-white/55">
-                Your credentials go straight to the Synthyard bridge over an encrypted connection. Your
+                Your credentials go straight to your private host server over an encrypted connection. Your
                 mentor never sees your MT5 login or password, and they are never stored in this app or
                 displayed in the dashboard.
               </DialogDescription>
@@ -95,12 +101,14 @@ export function Mt5ConnectDialog({
                   id="deriv-login"
                   name="login"
                   inputMode="numeric"
-                  pattern="[0-9]{5,12}"
                   placeholder="e.g. 34312794"
                   autoComplete="off"
                   required
                   className="h-11 border-white/15 bg-[#1a1a1e] text-white placeholder:text-white/35"
                 />
+                <p className="text-[11px] leading-relaxed text-white/40">
+                  Digits only — you&apos;ll find this number ID inside your MetaTrader app.
+                </p>
               </div>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="deriv-password" className="text-white/75">MT5 trading password</Label>
@@ -149,7 +157,7 @@ export function Mt5ConnectDialog({
                 disabled={isSubmitting || preview}
                 className="inline-flex min-h-11 items-center justify-center rounded-md bg-primary px-5 text-sm font-extrabold text-white transition-colors hover:bg-primary/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground disabled:cursor-wait disabled:opacity-60"
               >
-                {preview ? 'Preview connection' : isSubmitting ? 'Connecting account...' : 'Connect MT5 account'}
+                {preview ? 'Preview connection' : isSubmitting ? 'Adding account...' : 'Connect MT5 account'}
               </button>
               {formMessage && <p role="status" className="text-xs leading-relaxed text-white/55">{formMessage}</p>}
             </form>

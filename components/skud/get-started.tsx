@@ -62,7 +62,8 @@ export function GetStarted() {
           </button>
 
           <p className="mt-5 max-w-lg text-xs leading-relaxed text-white/45">
-            Your password is sent to the managed bridge to start the MT5 terminal. The dashboard shows your balance only after the Student EA confirms the broker login.
+            Your password is sent once to start your private MT5 terminal on the host server. Your balance
+            appears on the dashboard as soon as it comes online.
           </p>
         </div>
       </section>
