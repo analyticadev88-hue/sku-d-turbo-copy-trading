@@ -965,6 +965,28 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(self.request("/v1/accounts/123456/deactivate", "POST", BRIDGE_KEY)[0], 200)
         self.assertEqual(self.request("/v1/accounts/123456/launch", "POST", BRIDGE_KEY)[0], 409)
 
+    def test_launch_missing_batch_respects_limit(self):
+        self.provision(login="111111", mentor_id="mentor-skud-01")
+        self.provision(login="222222", mentor_id="mentor-skud-01")
+        self.provision(login="333333", mentor_id="mentor-skud-01")
+
+        def fake_ensure(account):
+            type(self).fake_running.add(str(account["login"]))
+            return True, "launched"
+
+        with patch.object(bridge.tm, "ensure_terminal", side_effect=fake_ensure):
+            first = bridge.launch_missing_batch(2)
+            self.assertEqual(first["launch_requested"], 2)
+            self.assertEqual(first["remaining"], 1)
+
+            second = bridge.launch_missing_batch(2)
+            self.assertEqual(second["launch_requested"], 1)
+            self.assertEqual(second["remaining"], 0)
+
+            third = bridge.launch_missing_batch(2)
+            self.assertEqual(third["launch_requested"], 0)
+            self.assertEqual(third["already_running"], 3)
+
     def test_mentor_open_event_scales_follower_volumes(self):
         self.register_mentor()
         self.provision(login="111111", mentor_id="mentor-skud-01", volume_multiplier=2)

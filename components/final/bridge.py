@@ -594,6 +594,50 @@ def reconcile_missing_terminals() -> dict:
     }
 
 
+def launch_missing_batch(limit: int) -> dict:
+    """Launch up to `limit` active accounts whose terminal is not running.
+
+    Same shape as reconcile_missing_terminals, plus `remaining`: active accounts
+    left for a later batch. Used by SKUD_BOOT_BATCH_SIZE bring-up so the operator
+    can review each batch before pressing on.
+    """
+    running = tm.running_logins(ttl=0)
+    with db_session() as db:
+        rows = db.execute("SELECT * FROM accounts WHERE is_active=1").fetchall()
+    results = []
+    remaining = 0
+    budget = max(1, int(limit))
+    for row in rows:
+        login = row["login"]
+        if login in running:
+            results.append({"login": login, "status": "already_running"})
+            continue
+        if budget <= 0:
+            remaining += 1
+            results.append({"login": login, "status": "pending_batch"})
+            continue
+        budget -= 1
+        ok, message = tm.ensure_terminal(dict(row))
+        if not ok:
+            status = "failed"
+        elif "already running" in message:
+            status = "already_running"
+        elif "in progress" in message:
+            status = "in_progress"
+        else:
+            status = "launch_requested"
+        results.append({"login": login, "status": status, "message": message})
+    return {
+        "active_accounts": len(rows),
+        "already_running": sum(result["status"] == "already_running" for result in results),
+        "launch_requested": sum(result["status"] == "launch_requested" for result in results),
+        "in_progress": sum(result["status"] == "in_progress" for result in results),
+        "failed": sum(result["status"] == "failed" for result in results),
+        "remaining": remaining,
+        "results": results,
+    }
+
+
 def reconcile_on_boot(force_refresh: bool = False) -> None:
     """Launch active accounts, optionally closing and refreshing managed terminals first."""
     if force_refresh:
@@ -1689,6 +1733,37 @@ class BridgeHandler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "Not found"})
 
 
+def _run_batch(batch_size: int) -> None:
+    try:
+        result = launch_missing_batch(batch_size)
+    except RuntimeError as error:
+        LOG.error("Batch launch skipped because running terminals could not be enumerated: %s", error)
+        return
+    for account in result["results"]:
+        if account["status"] == "failed":
+            LOG.error("Batch launch failed for login %s: %s", account["login"], account["message"])
+    if result["remaining"] > 0:
+        LOG.info(
+            "Batch: %d launched, %d already running, %d failed — %d still pending. Press Enter for the next batch.",
+            result["launch_requested"], result["already_running"], result["failed"], result["remaining"],
+        )
+    else:
+        LOG.info(
+            "Batch: %d launched, %d already running, %d failed — all active terminals are running.",
+            result["launch_requested"], result["already_running"], result["failed"],
+        )
+
+
+def _batch_loop(batch_size: int) -> None:
+    _run_batch(batch_size)
+    while True:
+        try:
+            input()
+        except EOFError:
+            return
+        _run_batch(batch_size)
+
+
 def main() -> None:
     logging.basicConfig(
         level=os.environ.get("SKUD_LOG_LEVEL", "INFO").upper(),
@@ -1702,7 +1777,11 @@ def main() -> None:
     port = int(os.environ.get("SKUD_PORT", "8765"))
     server = ThreadingHTTPServer((host, port), BridgeHandler)
     LOG.info("SkuD bridge listening at http://%s:%d", host, port)
-    if os.environ.get("SKUD_RECONCILE_ON_BOOT", "1") == "1":
+    batch_size = int(os.environ.get("SKUD_BOOT_BATCH_SIZE", "0") or "0")
+    if batch_size > 0:
+        LOG.info("Batch bring-up enabled (%d per batch). First batch starts now; press Enter for the next.", batch_size)
+        threading.Thread(target=_batch_loop, args=(batch_size,), daemon=True).start()
+    elif os.environ.get("SKUD_RECONCILE_ON_BOOT", "1") == "1":
         force_refresh = os.environ.get("SKUD_REFRESH_TERMINALS_ON_BOOT", "0") == "1"
         start_reconciliation_in_background(force_refresh=force_refresh)
     server.serve_forever()
