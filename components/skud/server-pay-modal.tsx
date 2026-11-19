@@ -15,7 +15,6 @@ type ServerPaySummary = {
   unpaidCount: number
   threshold: number
   pricePerStudent: number
-  whopUrl: string
   batchSize: number
   totalDue: number
   showModal: boolean
